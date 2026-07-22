@@ -3,6 +3,9 @@
 #include <Adafruit_SH110X.h>
 #include <WiFi.h>
 #include <ArduinoOTA.h>
+#include <HTTPClient.h> 
+#include <WiFiClientSecure.h>
+#include <ArduinoJson.h>
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -18,16 +21,19 @@
 const char* ssid = "OrangeCat";
 const char* password = "myorange32";
 
+// WiFi and OTA state management
+bool wifiEnabled = false;
 bool otaEnabled = false;
 bool otaConnecting = false;
 bool otaConnected = false;
 bool otaUpdating = false;
 int otaProgressPercent = 0;
-String otaStatusText = "Press SELECT to Start";
+String otaStatusText = "Press SEL to Start OTA";
 
 // Settings Submenu State
 enum SettingsMenu {
   SETTINGS_MAIN,
+  SETTINGS_WIFI,
   SETTINGS_OTA,
   SETTINGS_TUNE
 };
@@ -102,9 +108,11 @@ bool selectDoubleClicked = false;
 
 bool isPoweredOn = false;
 
+// Function Declarations
 void handleMenuState(bool up, bool down, bool select);
 void drawMenu();
 void drawOTAUIPage();
+void stopOTA();
 void runPomodoro(bool up, bool down, bool select);
 void runCalendar(bool up, bool down, bool select);
 void runFlashcards(bool up, bool down, bool select);
@@ -114,6 +122,34 @@ void runAlerts(bool up, bool down, bool select);
 void runPowerOff(bool up, bool down, bool select);
 void turnOffDevice();
 void turnOnDevice();
+
+// --- HTTPS API Utility ---
+String fetchHttpsApi(const char* url) {
+  if (WiFi.status() != WL_CONNECTED) {
+    return "Error: No WiFi";
+  }
+
+  WiFiClientSecure client;
+  client.setInsecure(); // Skip certificate verification for simple requests
+
+  HTTPClient http;
+  if (http.begin(client, url)) {
+    int httpCode = http.GET();
+    String payload = "";
+    if (httpCode > 0) {
+      if (httpCode == HTTP_CODE_OK) {
+        payload = http.getString();
+      } else {
+        payload = "HTTP Error: " + String(httpCode);
+      }
+    } else {
+      payload = "Conn Failed: " + String(http.errorToString(httpCode));
+    }
+    http.end();
+    return payload;
+  }
+  return "Error: Invalid URL";
+}
 
 void playClickSound() {
   tone(BUZZER_PIN, 1800, 15);
@@ -136,6 +172,7 @@ void playHappyBirthday() {
     262, 262, 523, 440, 349, 330, 294,
     466, 466, 440, 349, 392, 349
   };
+
   int durations[] = {
     250, 250, 500, 500, 500, 1000,
     250, 250, 500, 500, 500, 1000,
@@ -159,17 +196,31 @@ void playHappyBirthday() {
   digitalWrite(LED_PIN, HIGH);
 }
 
+// WiFi Control Functions
+void toggleWiFi() {
+  wifiEnabled = !wifiEnabled;
+  if (wifiEnabled) {
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, password);
+  } else {
+    stopOTA();
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+  }
+}
+
 void drawOTAUIPage() {
   display.clearDisplay();
   display.setTextColor(SH110X_WHITE);
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.print("OTA STATUS");
+  display.print("OTA STATUS: ");
+  display.print(otaEnabled ? "[ON]" : "[OFF]");
 
   display.setCursor(0, 14);
   display.print(otaStatusText);
 
-  if (otaConnected) {
+  if (WiFi.status() == WL_CONNECTED) {
     display.setCursor(0, 26);
     display.print(WiFi.localIP());
   }
@@ -179,15 +230,20 @@ void drawOTAUIPage() {
     int fillWidth = map(otaProgressPercent, 0, 100, 0, 124);
     display.fillRect(2, 42, fillWidth, 8, SH110X_WHITE);
     
-    display.setCursor(45, 54);
+    display.setCursor(0, 54);
+    display.print("Progress");
+
+    display.setCursor(125, 54);
     display.print(otaProgressPercent);
     display.print("%");
   } else {
-    display.setCursor(0, 52);
-    if(!otaEnabled) {
-      display.print("Click SEL to Connect");
+    display.setCursor(0, 50);
+    if (!wifiEnabled) {
+      display.print("Turn WiFi ON First!");
+    } else if (!otaEnabled) {
+      display.print("Click SEL to Enable");
     } else {
-      display.print("Waiting for Upload...");
+      display.print("Waiting Upload/SEL OFF");
     }
   }
   display.display();
@@ -199,6 +255,8 @@ void setupOTAHandlers() {
     otaStatusText = "Updating Firmware...";
     drawOTAUIPage();
   });
+
+  ArduinoOTA.setPassword("libyzxy0");
 
   ArduinoOTA.onEnd([]() {
     otaUpdating = false;
@@ -223,17 +281,20 @@ void setupOTAHandlers() {
 }
 
 void startOTA() {
-  if (!otaEnabled) {
-    otaConnecting = true;
-    otaStatusText = "Connecting WiFi...";
-    drawOTAUIPage();
-    
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
+  if (wifiEnabled && !otaEnabled) {
     setupOTAHandlers();
     ArduinoOTA.begin();
     otaEnabled = true;
+    otaStatusText = "Listening for OTA...";
   }
+}
+
+void stopOTA() {
+  otaEnabled = false;
+  otaConnecting = false;
+  otaConnected = false;
+  otaUpdating = false;
+  otaStatusText = "OTA Disabled";
 }
 
 void setup() {
@@ -263,10 +324,8 @@ void playPowerOffSound() {
 void turnOffDevice() {
   playPowerOffSound();
   isPoweredOn = false;
-  otaEnabled = false;
-  otaConnecting = false;
-  otaConnected = false;
-  otaUpdating = false;
+  wifiEnabled = false;
+  stopOTA();
   WiFi.mode(WIFI_OFF);
   digitalWrite(LED_PIN, LOW);
   display.clearDisplay();
@@ -290,15 +349,8 @@ void turnOnDevice() {
 }
 
 void loop() {
-  if (otaEnabled) {
-    if (otaConnecting && WiFi.status() == WL_CONNECTED) {
-      otaConnecting = false;
-      otaConnected = true;
-      otaStatusText = "Ready for OTA";
-      if (currentState == STATE_SETTINGS && currentSettingsSubState == SETTINGS_OTA) {
-        drawOTAUIPage();
-      }
-    }
+  // OTA is only actively handled when inside the OTA screen, WiFi is enabled, and OTA is toggled ON
+  if (currentState == STATE_SETTINGS && currentSettingsSubState == SETTINGS_OTA && wifiEnabled && otaEnabled) {
     ArduinoOTA.handle();
   }
 
@@ -364,6 +416,8 @@ void loop() {
   }
 
   if (currentState != STATE_MENU && selectLongPressed) {
+    // Safely disable OTA service when navigating back out to main menu
+    stopOTA();
     currentState = STATE_MENU;
     currentSettingsSubState = SETTINGS_MAIN;
     drawMenu();
@@ -427,7 +481,6 @@ void handleMenuState(bool up, bool down, bool select) {
   if (select) {
     playClickSound();
     currentState = menuItems[currentSelection].targetState;
-    
     if (currentState != STATE_POWER_OFF) {
       display.clearDisplay();
       display.setTextColor(SH110X_WHITE);
@@ -500,13 +553,104 @@ void runPomodoro(bool up, bool down, bool select) {
 }
 
 void runCalendar(bool up, bool down, bool select) {
+  static bool calendarLoaded = false;
+  static int currentEventIndex = 0;
+  static int totalEvents = 0;
+  struct LocalEvent {
+    String summary;
+    String timeRange;
+    String location;
+  };
+  static LocalEvent events[5];
+
+  if (!calendarLoaded) {
+    display.clearDisplay();
+    display.setTextColor(SH110X_WHITE);
+    display.setTextSize(1);
+    display.setCursor(10, 25);
+    display.print("Fetching Schedule...");
+    display.display();
+
+    String jsonResponse = fetchHttpsApi("https://urpocket.libyzxy0.me/api/calendar/today");
+    DynamicJsonDocument doc(2048);
+    DeserializationError error = deserializeJson(doc, jsonResponse);
+
+    totalEvents = 0;
+    currentEventIndex = 0;
+
+    if (!error && doc.is<JsonArray>()) {
+      JsonArray array = doc.as<JsonArray>();
+      for (JsonObject obj : array) {
+        if (totalEvents >= 5) break;
+        events[totalEvents].summary = obj["summary"].as<String>();
+        String startStr = obj["start"].as<String>();
+        String endStr = obj["end"].as<String>();
+        
+        int startT = startStr.indexOf('T');
+        int endT = endStr.indexOf('T');
+        String startTime = (startT != -1 && startStr.length() >= startT + 6) ?
+          startStr.substring(startT + 1, startT + 6) : startStr;
+        String endTime = (endT != -1 && endStr.length() >= endT + 6) ?
+          endStr.substring(endT + 1, endT + 6) : endStr;
+        
+        events[totalEvents].timeRange = startTime + " - " + endTime;
+        events[totalEvents].location = obj["location"].as<String>();
+
+        totalEvents++;
+      }
+    }
+
+    calendarLoaded = true;
+  }
+
+  if (down && totalEvents > 0) {
+    playClickSound();
+    currentEventIndex++;
+    if (currentEventIndex >= totalEvents) {
+      currentEventIndex = 0;
+    }
+  }
+
+  if (up && totalEvents > 0) {
+    playClickSound();
+    currentEventIndex--;
+    if (currentEventIndex < 0) {
+      currentEventIndex = totalEvents - 1;
+    }
+  }
+
   display.clearDisplay();
   display.setTextColor(SH110X_WHITE);
-  display.setCursor(10, 20);
   display.setTextSize(1);
-  display.print("Calendar App");
-  display.setCursor(10, 45);
-  display.print("Hold SELECT to exit");
+  display.setTextWrap(true);
+
+  if (totalEvents == 0) {
+    display.setCursor(10, 25);
+    display.print("No Events Found!");
+  } else {
+    display.setCursor(0, 0);
+    display.print("SCHEDULE");
+    String pageIndicator = String(currentEventIndex + 1) + "/" + String(totalEvents);
+    display.setCursor(128 - (pageIndicator.length() * 6), 0);
+    display.print(pageIndicator);
+    display.drawLine(0, 10, 128, 10, SH110X_WHITE);
+
+    display.setCursor(0, 14);
+    display.print(events[currentEventIndex].summary);
+
+    display.setCursor(0, 32);
+    display.print("Time: ");
+    display.print(events[currentEventIndex].timeRange);
+    display.setCursor(0, 44);
+    display.print("Loc: ");
+    display.print(events[currentEventIndex].location);
+
+    if (totalEvents > 1) {
+      display.setCursor(120, 54);
+      display.print(currentEventIndex < totalEvents - 1 ? "v" : "^");
+    }
+  }
+
   display.display();
 }
 
@@ -533,6 +677,7 @@ void runMessages(bool up, bool down, bool select) {
                            "PQRSTUVWXYZ <-S";
   const int totalKeys = sizeof(keyboard) - 1;
   const int keysPerRow = 15;
+
   if (sendingStatus && (millis() - sendingTime > 1500)) {
     sendingStatus = false;
   }
@@ -654,8 +799,9 @@ void runMessages(bool up, bool down, bool select) {
 
 void runSettings(bool up, bool down, bool select) {
   if (currentSettingsSubState == SETTINGS_MAIN) {
-    const char* settingsMenuLabels[] = {"1. OTA Updates", "2. Play Tune", "3. Back to Menu"};
-    const int totalSettingsItems = 3;
+    String wifiLabel = "WiFi: " + String(wifiEnabled ? "       [ON]" : "       [OFF]");
+    const char* settingsMenuLabels[] = {wifiLabel.c_str(), "OTA Updates", "Test Sound"};
+    const int totalSettingsItems = sizeof(settingsMenuLabels) / sizeof(settingsMenuLabels[0]);
 
     if (down) {
       settingsSelection++;
@@ -669,13 +815,11 @@ void runSettings(bool up, bool down, bool select) {
     if (select) {
       playClickSound();
       if (settingsSelection == 0) {
-        currentSettingsSubState = SETTINGS_OTA;
+        toggleWiFi();
       } else if (settingsSelection == 1) {
-        currentSettingsSubState = SETTINGS_TUNE;
+        currentSettingsSubState = SETTINGS_OTA;
       } else if (settingsSelection == 2) {
-        currentState = STATE_MENU;
-        drawMenu();
-        return;
+        currentSettingsSubState = SETTINGS_TUNE;
       }
     }
 
@@ -684,10 +828,11 @@ void runSettings(bool up, bool down, bool select) {
     display.setTextColor(SH110X_WHITE);
     display.setCursor(0, 0);
     display.print("SETTINGS");
+    display.drawLine(0, 10, 128, 10, SH110X_WHITE);
     for (int i = 0; i < totalSettingsItems; i++) {
-      int yPos = 16 + (i * 15);
+      int yPos = 14 + (i * 12);
       if (i == settingsSelection) {
-        display.fillRect(0, yPos - 2, SCREEN_WIDTH, 13, SH110X_WHITE);
+        display.fillRect(0, yPos - 1, SCREEN_WIDTH, 11, SH110X_WHITE);
         display.setTextColor(SH110X_BLACK);
       } else {
         display.setTextColor(SH110X_WHITE);
@@ -698,9 +843,13 @@ void runSettings(bool up, bool down, bool select) {
     display.display();
   } 
   else if (currentSettingsSubState == SETTINGS_OTA) {
-    if (select && !otaEnabled) {
+    if (select) {
       playClickSound();
-      startOTA();
+      if (!otaEnabled && wifiEnabled) {
+        startOTA();
+      } else if (otaEnabled) {
+        stopOTA();
+      }
     }
     drawOTAUIPage();
   }
@@ -714,12 +863,13 @@ void runSettings(bool up, bool down, bool select) {
     display.setTextColor(SH110X_WHITE);
     display.setTextSize(1);
     display.setCursor(0, 0);
-    display.print("Test Player");
+    display.print("Test Sound");
+    display.drawLine(0, 10, 128, 10, SH110X_WHITE);
     
-    display.setCursor(0, 20);
+    display.setCursor(0, 10);
     display.print("Song: Happy Birthday");
     
-    display.setCursor(0, 44);
+    display.setCursor(0, 54);
     display.print("Press SEL to Play");
     display.display();
   }
@@ -737,7 +887,7 @@ void runAlerts(bool up, bool down, bool select) {
 }
 
 void runPowerOff(bool up, bool down, bool select) {
-  const char* options[] = {"1. Power Off", "2. Restart", "3. Back"};
+  const char* options[] = {"Power Off", "Restart", "Back"};
   const int totalOptions = 3;
 
   if (down) {
@@ -768,7 +918,7 @@ void runPowerOff(bool up, bool down, bool select) {
   display.setTextColor(SH110X_WHITE);
   display.setCursor(0, 0);
   display.print("POWER OPTIONS");
-
+   display.drawLine(0, 10, 128, 10, SH110X_WHITE);
   for (int i = 0; i < totalOptions; i++) {
     int yPos = 18 + (i * 15);
     if (i == powerMenuSelection) {
