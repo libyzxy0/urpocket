@@ -214,8 +214,9 @@ void drawOTAUIPage() {
   display.setTextColor(SH110X_WHITE);
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.print("OTA STATUS: ");
-  display.print(otaEnabled ? "[ON]" : "[OFF]");
+  display.print("OTA STATUS");
+  display.print(otaEnabled ? "    ENABLED" : "   DISABLED");
+  display.drawLine(0, 10, 128, 10, SH110X_WHITE);
 
   display.setCursor(0, 14);
   display.print(otaStatusText);
@@ -233,7 +234,11 @@ void drawOTAUIPage() {
     display.setCursor(0, 54);
     display.print("Progress");
 
-    display.setCursor(125, 54);
+    if(otaProgressPercent > 10) {
+      display.setCursor(112, 54);
+    } else {
+      display.setCursor(115, 54);
+    }
     display.print(otaProgressPercent);
     display.print("%");
   } else {
@@ -243,7 +248,7 @@ void drawOTAUIPage() {
     } else if (!otaEnabled) {
       display.print("Click SEL to Enable");
     } else {
-      display.print("Waiting Upload/SEL OFF");
+      display.print("Waiting Upload...");
     }
   }
   display.display();
@@ -554,11 +559,14 @@ void runPomodoro(bool up, bool down, bool select) {
 
 void runCalendar(bool up, bool down, bool select) {
   static bool calendarLoaded = false;
+  static bool viewingDetail = false;
   static int currentEventIndex = 0;
   static int totalEvents = 0;
   struct LocalEvent {
     String summary;
-    String timeRange;
+    String code;       // e.g. "IT102"
+    String startTime;  // e.g. "07:00"
+    String timeRange;  // e.g. "07:00 - 10:00"
     String location;
   };
   static LocalEvent events[5];
@@ -577,22 +585,31 @@ void runCalendar(bool up, bool down, bool select) {
 
     totalEvents = 0;
     currentEventIndex = 0;
+    viewingDetail = false;
 
     if (!error && doc.is<JsonArray>()) {
       JsonArray array = doc.as<JsonArray>();
       for (JsonObject obj : array) {
         if (totalEvents >= 5) break;
-        events[totalEvents].summary = obj["summary"].as<String>();
+
+        String summary = obj["summary"].as<String>();
         String startStr = obj["start"].as<String>();
         String endStr = obj["end"].as<String>();
-        
+
         int startT = startStr.indexOf('T');
         int endT = endStr.indexOf('T');
         String startTime = (startT != -1 && startStr.length() >= startT + 6) ?
           startStr.substring(startT + 1, startT + 6) : startStr;
         String endTime = (endT != -1 && endStr.length() >= endT + 6) ?
           endStr.substring(endT + 1, endT + 6) : endStr;
-        
+
+        // Pull the short code off the front of "IT102 - Introduction to Computing"
+        int dashIdx = summary.indexOf(" - ");
+        String code = (dashIdx != -1) ? summary.substring(0, dashIdx) : summary;
+
+        events[totalEvents].summary = summary;
+        events[totalEvents].code = code;
+        events[totalEvents].startTime = startTime;
         events[totalEvents].timeRange = startTime + " - " + endTime;
         events[totalEvents].location = obj["location"].as<String>();
 
@@ -603,22 +620,28 @@ void runCalendar(bool up, bool down, bool select) {
     calendarLoaded = true;
   }
 
-  if (down && totalEvents > 0) {
-    playClickSound();
-    currentEventIndex++;
-    if (currentEventIndex >= totalEvents) {
-      currentEventIndex = 0;
+  // ---- Input handling ----
+  if (viewingDetail) {
+    if (up || down || select) {
+      playClickSound();
+      viewingDetail = false;
+    }
+  } else {
+    if (down && totalEvents > 0) {
+      playClickSound();
+      currentEventIndex = (currentEventIndex + 1) % totalEvents;
+    }
+    if (up && totalEvents > 0) {
+      playClickSound();
+      currentEventIndex = (currentEventIndex - 1 + totalEvents) % totalEvents;
+    }
+    if (select && totalEvents > 0) {
+      playClickSound();
+      viewingDetail = true;
     }
   }
 
-  if (up && totalEvents > 0) {
-    playClickSound();
-    currentEventIndex--;
-    if (currentEventIndex < 0) {
-      currentEventIndex = totalEvents - 1;
-    }
-  }
-
+  // ---- Render ----
   display.clearDisplay();
   display.setTextColor(SH110X_WHITE);
   display.setTextSize(1);
@@ -627,28 +650,50 @@ void runCalendar(bool up, bool down, bool select) {
   if (totalEvents == 0) {
     display.setCursor(10, 25);
     display.print("No Events Found!");
-  } else {
+  } else if (viewingDetail) {
+    LocalEvent &e = events[currentEventIndex];
+
     display.setCursor(0, 0);
-    display.print("SCHEDULE");
-    String pageIndicator = String(currentEventIndex + 1) + "/" + String(totalEvents);
-    display.setCursor(128 - (pageIndicator.length() * 6), 0);
-    display.print(pageIndicator);
+    display.print(e.code);
     display.drawLine(0, 10, 128, 10, SH110X_WHITE);
 
     display.setCursor(0, 14);
-    display.print(events[currentEventIndex].summary);
+    display.print(e.summary);
 
     display.setCursor(0, 32);
-    display.print("Time: ");
-    display.print(events[currentEventIndex].timeRange);
-    display.setCursor(0, 44);
-    display.print("Loc: ");
-    display.print(events[currentEventIndex].location);
+    display.print("TIME: ");
+    display.print(e.timeRange);
 
-    if (totalEvents > 1) {
-      display.setCursor(120, 54);
-      display.print(currentEventIndex < totalEvents - 1 ? "v" : "^");
+    display.setCursor(0, 42);
+    display.print(e.location);
+  } else {
+    display.setCursor(0, 0);
+    display.print("SCHEDULE");
+    String countStr = String(totalEvents) + (totalEvents == 1 ? " event" : " events");
+    display.setCursor(128 - (countStr.length() * 6), 0);
+    display.print(countStr);
+    display.drawLine(0, 10, 128, 10, SH110X_WHITE);
+
+    for (int i = 0; i < totalEvents; i++) {
+      int y = 14 + (i * 10);
+      bool selected = (i == currentEventIndex);
+
+      if (selected) {
+        display.fillRect(0, y - 1, 128, 9, SH110X_WHITE);
+        display.setTextColor(SH110X_BLACK);
+      } else {
+        display.setTextColor(SH110X_WHITE);
+      }
+
+      display.setCursor(2, y);
+      display.print(events[i].code);
+
+      String t = events[i].startTime;
+      display.setCursor(128 - (t.length() * 6) - 2, y);
+      display.print(t);
     }
+
+    display.setTextColor(SH110X_WHITE);
   }
 
   display.display();
@@ -799,8 +844,8 @@ void runMessages(bool up, bool down, bool select) {
 
 void runSettings(bool up, bool down, bool select) {
   if (currentSettingsSubState == SETTINGS_MAIN) {
-    String wifiLabel = "WiFi: " + String(wifiEnabled ? "       [ON]" : "       [OFF]");
-    const char* settingsMenuLabels[] = {wifiLabel.c_str(), "OTA Updates", "Test Sound"};
+    String wifiLabel = "WiFi  " + String(wifiEnabled ? "            ON" : "           OFF");
+    const char* settingsMenuLabels[] = {wifiLabel.c_str(), "Reprogram          >", "TSound             >"};
     const int totalSettingsItems = sizeof(settingsMenuLabels) / sizeof(settingsMenuLabels[0]);
 
     if (down) {
