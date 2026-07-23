@@ -41,10 +41,10 @@ def process_chat(q: str):
 
     data = response.json()
 
-    # Check for API errors or missing 'choices'
     if response.status_code != 200 or "choices" not in data:
         error_msg = data.get("error", {}).get("message", "Unknown API error")
         print(f"[OpenRouter Error] Status {response.status_code}: {error_msg}")
-        return f"Error: {response.status_code}"
+        return {"res": f"Error: {response.status_code}"}
 
-    return data["choices"][0]["message"]["content"].strip()
+    content = data["choices"][0]["message"]["content"].strip()
+    return {"res": content}

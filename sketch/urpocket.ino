@@ -920,20 +920,21 @@ void runCalculator(bool up, bool down, bool select) {
   display.display();
 }
 
-void runChat(bool up, bool down, bool select) {
+vvoid runChat(bool up, bool down, bool select) {
   static char messageBuffer[16] = "";
   static int charCount = 0;
   static int currentKeyIndex = 0;
   static bool keyboardActive = true;
   static bool sendingStatus = false;
   static unsigned long sendingTime = 0;
+  static String lastResponse = "";
 
   const char keyboard[] = "ABCDEFGHIJKLMNO"
                            "PQRSTUVWXYZ <-S";
   const int totalKeys = sizeof(keyboard) - 1;
   const int keysPerRow = 15;
 
-  if (sendingStatus && (millis() - sendingTime > 1500)) {
+  if (sendingStatus && (millis() - sendingTime > 3000)) {
     sendingStatus = false;
   }
 
@@ -944,10 +945,40 @@ void runChat(bool up, bool down, bool select) {
     if (keyboardActive) {
       char selectedChar = keyboard[currentKeyIndex];
       if (selectedChar == 'S') {
-        sendingStatus = true;
-        sendingTime = millis();
-        messageBuffer[0] = '\0';
-        charCount = 0;
+        if (charCount > 0) {
+          sendingStatus = true;
+          sendingTime = millis();
+
+          display.clearDisplay();
+          display.setCursor(20, 25);
+          display.setTextSize(1);
+          display.setTextColor(SH110X_WHITE);
+          display.print("Sending...");
+          display.display();
+
+          // Construct API URL with user query
+          String query = String(messageBuffer);
+          query.replace(" ", "%20"); // Simple URL encoding for spaces
+          String url = "https://urpocket.libyzxy0.me/api/chat?q=" + query;
+
+          // Fetch API response
+          String jsonResponse = fetchHttpsApi(url.c_str());
+
+          // Parse JSON response
+          DynamicJsonDocument doc(512);
+          DeserializationError error = deserializeJson(doc, jsonResponse);
+
+          if (!error && doc.containsKey("res")) {
+            lastResponse = doc["res"].as<String>();
+          } else {
+            lastResponse = "Error getting response";
+          }
+
+          // Reset input buffer & switch to response view
+          messageBuffer[0] = '\0';
+          charCount = 0;
+          keyboardActive = false;
+        }
       }
       else if (selectedChar == '<') {
         if (charCount > 0) {
@@ -977,11 +1008,12 @@ void runChat(bool up, bool down, bool select) {
   }
 
   display.clearDisplay();
+
   if (sendingStatus) {
     display.setCursor(20, 25);
     display.setTextSize(1);
     display.setTextColor(SH110X_WHITE);
-    display.print("Message Sent!");
+    display.print("Sending...");
     display.display();
     return;
   }
@@ -1017,36 +1049,30 @@ void runChat(bool up, bool down, bool select) {
   } else {
     display.setTextColor(SH110X_WHITE);
     
-    const char* textToShow = "Hello";
+    const char* textToShow = lastResponse.length() > 0 ? lastResponse.c_str() : "No Message";
     int textLength = strlen(textToShow);
 
-    if (textLength == 0) {
-      display.setTextSize(2);
-      display.setCursor(22, 24);
-      display.print("Message");
+    int textSize = 1;
+    if (textLength <= 7) textSize = 3;
+    else if (textLength <= 10) textSize = 2;
+    
+    display.setTextSize(textSize);
+    
+    if (textSize == 1) {
+      display.setTextWrap(true);
+      display.setCursor(0, 0);
     } else {
-      int textSize = 3;
-      if (textLength > 10) textSize = 1;
-      else if (textLength > 7) textSize = 2;
+      display.setTextWrap(false);
+      int16_t x1, y1;
+      uint16_t w, h;
+      display.getTextBounds(textToShow, 0, 0, &x1, &y1, &w, &h);
       
-      display.setTextSize(textSize);
-      
-      if (textSize == 1) {
-        display.setTextWrap(true);
-        display.setCursor(0, 0);
-      } else {
-        display.setTextWrap(false);
-        int16_t x1, y1;
-        uint16_t w, h;
-        display.getTextBounds(textToShow, 0, 0, &x1, &y1, &w, &h);
-        
-        int xPos = (128 - w) / 2 - x1;
-        int yPos = (64 - h) / 2 - y1;
-        display.setCursor(xPos, yPos);
-      }
-      
-      display.print(textToShow);
+      int xPos = (128 - w) / 2 - x1;
+      int yPos = (64 - h) / 2 - y1;
+      display.setCursor(xPos, yPos);
     }
+    
+    display.print(textToShow);
   }
 
   display.display();
