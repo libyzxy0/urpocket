@@ -26,7 +26,7 @@ def process_chat(q: str):
            {
                 "role": "system",
                 "content": "Answer in under 60 characters total. Be extremely concise. Output only simple chars. utf8 in formulas make it basic",
-            },
+            },   
             {"role": "user", "content": q},
         ],
         "reasoning": {"enabled": False},

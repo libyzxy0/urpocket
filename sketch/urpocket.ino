@@ -6,6 +6,8 @@
 #include <HTTPClient.h> 
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
+#include <esp_system.h>
+#include <time.h>
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -21,6 +23,10 @@
 const char* ssid = "OrangeCat";
 const char* password = "myorange32";
 
+const char* ntpServer = "pool.ntp.org";
+const long gmtOffset_sec = 8 * 3600;
+const int daylightOffset_sec = 0;
+
 bool wifiEnabled = false;
 bool otaEnabled = false;
 bool otaConnecting = false;
@@ -33,11 +39,12 @@ enum SettingsMenu {
   SETTINGS_MAIN,
   SETTINGS_WIFI,
   SETTINGS_OTA,
-  SETTINGS_TUNE
+  SETTINGS_TUNE,
+  SETTINGS_SYSINFO
 };
 SettingsMenu currentSettingsSubState = SETTINGS_MAIN;
 int settingsSelection = 0;
-
+int sysInfoPage = 0;
 int powerMenuSelection = 0;
 
 Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
@@ -54,6 +61,10 @@ static const unsigned char PROGMEM icon_flashcards[] = {0x7f,0xfc,0xc0,0x06,0xff
 static const unsigned char PROGMEM icon_bell[] = {0x11,0x88,0x63,0xc6,0x44,0x22,0x8c,0x11,0x88,0x11,0x10,0x08,0x10,0x08,0x10,0x08,0x10,0x08,0x20,0x04,0x20,0x04,0x40,0x02,0xff,0xff,0x06,0x60,0x03,0xc0,0x00,0x00};
 static const unsigned char PROGMEM icon_pomodoro[] = {0xff,0xe0,0x40,0x40,0x40,0x40,0x51,0x40,0x5f,0x40,0x2e,0x80,0x15,0x00,0x0a,0x00,0x0a,0x00,0x11,0x00,0x24,0x80,0x44,0x40,0x4e,0x40,0x5f,0x40,0x7f,0xc0,0xff,0xe0};
 static const unsigned char PROGMEM icon_calculator[] = {0x7f,0xe0,0x80,0x10,0xbf,0xd0,0xa0,0x50,0xbf,0xd0,0x80,0x10,0xb6,0xd0,0xb6,0xd0,0x80,0x10,0xb6,0xd0,0xb6,0xd0,0x80,0x10,0xb6,0xd0,0xb6,0xd0,0x80,0x10,0x7f,0xe0};
+
+static const unsigned char PROGMEM image_space[] = {0x1f,0xff,0xff,0xff,0xff,0xff,0xff,0xfe,0x00,0x60,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x00,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0xe0,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x80,0x7f,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0x00,0x3f,0xff,0xff,0xff,0xff,0xff,0xff,0xfe,0x00};
+static const unsigned char PROGMEM image_logo[] = {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x7c,0x00,0x00,0x00,0x00,0x00,0x00,0x07,0xff,0x80,0x00,0x00,0x00,0x00,0x00,0x1f,0xff,0xf0,0x00,0x00,0x00,0x00,0x00,0x3f,0xff,0xf8,0x00,0x00,0x00,0x00,0x00,0x7f,0xc0,0x1c,0x00,0x00,0x00,0x00,0x00,0xff,0x00,0x02,0x00,0x00,0x00,0x00,0x01,0xfc,0x00,0x00,0x00,0x00,0x00,0x00,0x03,0xf8,0x03,0xfe,0x00,0x00,0x00,0x00,0x07,0xf0,0x1f,0xff,0x80,0x00,0x00,0x00,0x07,0xe0,0x7f,0xff,0xe0,0x00,0x00,0x00,0x07,0xc0,0xff,0xff,0xf0,0x00,0x00,0x00,0x0f,0x81,0xff,0x80,0x3c,0x00,0x00,0x00,0x0f,0x83,0xfc,0x00,0x04,0x00,0x00,0x00,0x0f,0x07,0xf8,0x00,0x02,0x00,0x00,0x00,0x0f,0x07,0xe0,0x0e,0x00,0x00,0x00,0x00,0x0f,0x0f,0xc0,0xff,0xe0,0x00,0x00,0x00,0x1e,0x0f,0x83,0xff,0xf0,0x00,0x00,0x00,0x0e,0x1f,0x87,0xff,0xfc,0x00,0x00,0x00,0x0e,0x1f,0x0f,0xff,0xfe,0x00,0x00,0x00,0x0e,0x1e,0x0f,0xff,0xfe,0x00,0x00,0x00,0x0e,0x3e,0x1f,0xff,0xff,0x00,0x00,0x00,0x0e,0x3e,0x3f,0xff,0xff,0x00,0x00,0x00,0x06,0x3c,0x3f,0xff,0xff,0x80,0x00,0x00,0x07,0x3c,0x3f,0xff,0xff,0x80,0x00,0x00,0x03,0x3c,0x7f,0xff,0xff,0x80,0x00,0x00,0x03,0x3c,0x7f,0xff,0xff,0xc0,0x00,0x00,0x01,0x9c,0x7f,0xff,0xff,0xc0,0x00,0x00,0x00,0x9c,0x7f,0xff,0xff,0xc0,0x00,0x00,0x00,0x5c,0x7f,0xff,0xff,0x80,0x00,0x00,0x00,0x0c,0x3f,0xff,0xff,0x80,0x00,0x00,0x00,0x0c,0x3f,0xff,0xff,0x80,0x00,0x00,0x00,0x06,0x3f,0xff,0xff,0x00,0x00,0x00,0x00,0x06,0x1f,0xff,0xff,0x00,0x00,0x00,0x00,0x02,0x1f,0xff,0xfe,0x00,0x00,0x00,0x00,0x01,0x0f,0xff,0xfe,0x00,0x00,0x00,0x00,0x00,0x07,0xff,0xfc,0x00,0x00,0x00,0x00,0x00,0x03,0xff,0xf0,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0xe0,0x00,0x00,0x00,0x00,0x00,0x00,0x1f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+static const unsigned char PROGMEM image_certification[] = {0xfc,0x7f,0x8f,0xc0,0x00,0x3c,0x00,0x07,0x80,0x00,0x00,0x3f,0x80,0xfc,0x7f,0x8f,0xc0,0x00,0xfc,0x00,0x1f,0x80,0x1f,0xf0,0xff,0xe0,0xfc,0x73,0x8f,0xc0,0x03,0xfc,0x00,0x7f,0x80,0x1f,0xe3,0xc0,0x78,0xe0,0x73,0x8e,0x00,0x07,0xe0,0x00,0xfc,0x00,0x18,0x07,0x00,0x1c,0xe0,0x73,0x8e,0x00,0x0f,0x80,0x01,0xf0,0x00,0x18,0x0e,0x00,0x0e,0xe0,0x73,0x8e,0x00,0x1e,0x00,0x03,0xc0,0x00,0x18,0x0c,0x1f,0x00,0xe0,0x73,0x8e,0x00,0x1c,0x00,0x03,0x80,0x00,0x18,0x18,0x7f,0xc0,0xe0,0x73,0x8e,0x00,0x3c,0x00,0x07,0x80,0x00,0x18,0x18,0xe0,0xe0,0xe0,0x73,0x8e,0x00,0x38,0x00,0x07,0x00,0x00,0x18,0x30,0xc0,0x40,0xe0,0x73,0x8e,0x00,0x38,0x00,0x07,0x00,0x00,0x18,0x31,0x80,0x00,0xfc,0x7f,0x8e,0x00,0x38,0x00,0x07,0xfe,0x00,0x1f,0xf1,0x80,0x00,0xfc,0x7f,0x8e,0x00,0x38,0x00,0x07,0xfe,0x00,0x1f,0xf1,0x80,0x00,0xfc,0x7f,0x8e,0x00,0x38,0x00,0x07,0xfe,0x00,0x18,0x31,0x80,0x00,0xe0,0x73,0x8e,0x00,0x38,0x00,0x07,0x00,0x00,0x18,0x31,0x80,0x00,0xe0,0x73,0x8e,0x00,0x38,0x00,0x07,0x00,0x00,0x18,0x30,0xc0,0x40,0xe0,0x73,0x8e,0x00,0x3c,0x00,0x07,0x80,0x00,0x18,0x18,0xe0,0xe0,0xe0,0x73,0x8e,0x00,0x1c,0x00,0x03,0x80,0x00,0x18,0x18,0x7f,0xc0,0xe0,0x73,0x8e,0x00,0x1e,0x00,0x03,0xc0,0x00,0x18,0x0c,0x1f,0x06,0xe0,0x73,0x8e,0x00,0x0f,0x80,0x01,0xf0,0x00,0x18,0x0e,0x00,0x0e,0xe0,0x73,0x8e,0x00,0x07,0xe0,0x00,0xfc,0x00,0x18,0x07,0x00,0x1c,0xfc,0x73,0x8f,0xc0,0x03,0xfc,0x00,0x7f,0x80,0x18,0x03,0xc0,0x78,0xfc,0x73,0x8f,0xc0,0x00,0xfc,0x00,0x1f,0x80,0x10,0x00,0xff,0xe0,0xfc,0x73,0x8f,0xc0,0x00,0x3c,0x00,0x07,0x80,0x00,0x00,0x3f,0x80,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x30,0x33,0x07,0x00,0x80,0x00,0x02,0x00,0x00,0x07,0x00,0x00,0x00,0x30,0x33,0x0e,0x00,0x41,0xff,0x04,0x00,0x00,0x0f,0x80,0x00,0x00,0x30,0x33,0x3c,0x00,0x26,0x00,0xc8,0x00,0x00,0x1f,0xc0,0x00,0x00,0x30,0x33,0x70,0x00,0x18,0x00,0x30,0x00,0x00,0x38,0xe0,0x00,0x00,0x30,0x33,0xe0,0x00,0x0f,0xff,0xe0,0x00,0x00,0x30,0x60,0x00,0x00,0x30,0x33,0xe0,0x00,0x04,0x00,0x40,0x00,0x00,0x70,0x70,0x00,0x00,0x30,0x33,0x70,0x00,0x06,0x00,0xc0,0x00,0x00,0xe0,0x38,0x00,0x00,0x30,0x33,0x3c,0x00,0x05,0x01,0x40,0x00,0x01,0xcf,0x9c,0x00,0x00,0x3f,0xf3,0x0e,0x00,0x04,0xbe,0x40,0x00,0x01,0x90,0x4c,0x00,0x00,0x1f,0xe3,0x07,0x00,0x04,0x44,0x40,0x00,0x03,0xa0,0x0e,0x00,0x00,0x00,0x00,0x00,0x00,0x02,0x28,0x80,0x00,0x07,0x40,0x17,0x00,0x00,0x00,0x00,0x00,0x00,0x02,0x10,0x80,0x00,0x0e,0x80,0x2b,0x80,0x00,0x1f,0xf1,0xfe,0x00,0x02,0x28,0x80,0x00,0x0c,0x88,0x49,0x80,0x00,0x3f,0xf3,0xff,0x00,0x02,0x44,0x80,0x00,0x1c,0x88,0x89,0xc0,0x00,0x30,0x03,0x03,0x00,0x02,0x82,0x80,0x00,0x38,0x85,0x08,0xe0,0x00,0x30,0x03,0x03,0x00,0x01,0x01,0x00,0x00,0x70,0x86,0x08,0x70,0x00,0x30,0x03,0x03,0x00,0x03,0x01,0x80,0x00,0x60,0x40,0x10,0x30,0x00,0x30,0x03,0xff,0x00,0x05,0x03,0xc0,0x00,0xe0,0x20,0x20,0x38,0x00,0x30,0x03,0xff,0x00,0x09,0x04,0x60,0x01,0xc0,0x10,0x40,0x1c,0x00,0x30,0x03,0x03,0x00,0x11,0x05,0x50,0x01,0x80,0x0f,0x80,0x0c,0x00,0x3f,0xf3,0x03,0x00,0x20,0xfc,0x48,0x01,0xc0,0x00,0x00,0x1c,0x00,0x1f,0xf3,0x03,0x00,0x40,0x03,0x84,0x00,0xff,0xff,0xff,0xf8,0x00,0x00,0x00,0x00,0x00,0x80,0x00,0x02,0x00,0x7f,0xff,0xff,0xf0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x3f,0xff,0xf8,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x3f,0xff,0xf8,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x3f,0xff,0xf8,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x3f,0xff,0xf8,0x00,0x00,0x00,0x00,0x00};
 
 enum AppState {
   STATE_MENU,
@@ -82,7 +93,7 @@ MenuItem menuItems[NUM_ITEMS] = {
   {"Flashcards", icon_flashcards, STATE_FLASHCARDS},
   {"Calculator", icon_calculator, STATE_CALCULATOR},
   {"Alerts",     icon_bell,       STATE_ALERTS},
-  {"ChatGpt",   icon_message,     STATE_CHAT},
+  {"ChatGpt",    icon_message,    STATE_CHAT},
   {"Settings",   icon_gear,       STATE_SETTINGS},
   {"Power Options", icon_power,   STATE_POWER_OFF}
 };
@@ -99,10 +110,12 @@ const unsigned long debounceDelay = 40;
 
 unsigned long selectPressedTime = 0;
 bool isLongPressHandled = false;
+
 const unsigned long longPressDelay = 600;
 
 unsigned long lastSelectReleaseTime = 0;
 bool selectClickPending = false;
+
 const unsigned long doubleClickDelay = 250;
 bool selectDoubleClicked = false;
 
@@ -115,6 +128,7 @@ void stopOTA();
 void runPomodoro(bool up, bool down, bool select);
 void runCalendar(bool up, bool down, bool select);
 void runFlashcards(bool up, bool down, bool select);
+void runCalculator(bool up, bool down, bool select);
 void runChat(bool up, bool down, bool select);
 void runSettings(bool up, bool down, bool select);
 void runAlerts(bool up, bool down, bool select);
@@ -128,7 +142,7 @@ String fetchHttpsApi(const char* url) {
   }
 
   WiFiClientSecure client;
-  client.setInsecure(); // Skip certificate verification for simple requests
+  client.setInsecure();
 
   HTTPClient http;
   if (http.begin(client, url)) {
@@ -153,6 +167,47 @@ void playClickSound() {
   tone(BUZZER_PIN, 1800, 15);
 }
 
+void drawSplashScreen() {
+  const unsigned long duration = 2000;
+  const int maxProgressWidth = 65;
+  unsigned long startTime = millis();
+
+  playBootSound();
+
+  while (millis() - startTime < duration) {
+    display.clearDisplay();
+
+    display.drawBitmap(-7, 3, image_logo, 64, 64, SH110X_WHITE);
+
+    display.setTextColor(SH110X_WHITE);
+    display.setTextWrap(false);
+    display.setCursor(65, 18);
+    display.print("URPocket");
+
+    display.setCursor(58, 36);
+    display.print("1.0.0 LTS");
+
+    display.drawBitmap(56, 13, image_space, 65, 18, SH110X_WHITE);
+
+    display.drawRect(54, 48, 69, 8, SH110X_WHITE);
+
+    unsigned long elapsed = millis() - startTime;
+    int fillWidth = map(elapsed, 0, duration, 0, maxProgressWidth);
+    if (fillWidth > maxProgressWidth) fillWidth = maxProgressWidth;
+
+    display.fillRect(56, 50, fillWidth, 4, SH110X_WHITE);
+
+    display.display();
+
+    delay(30); 
+  }
+
+  display.clearDisplay();
+  display.drawBitmap(12, 4, image_certification, 103, 56, SH110X_WHITE);
+  display.display();
+  delay(1500); 
+}
+
 void playBootSound() {
   tone(BUZZER_PIN, 1047, 100);
   delay(120);
@@ -170,7 +225,6 @@ void playHappyBirthday() {
     262, 262, 523, 440, 349, 330, 294,
     466, 466, 440, 349, 392, 349
   };
-
   int durations[] = {
     250, 250, 500, 500, 500, 1000,
     250, 250, 500, 500, 500, 1000,
@@ -199,6 +253,7 @@ void toggleWiFi() {
   if (wifiEnabled) {
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   } else {
     stopOTA();
     WiFi.disconnect(true);
@@ -230,11 +285,10 @@ void drawOTAUIPage() {
     
     display.setCursor(0, 54);
     display.print("Progress");
-
-    if(otaProgressPercent >= 10) {
+    if(otaProgressPercent >= 100) {
+      display.setCursor(104, 54);
+    } else if (otaProgressPercent >= 10) {
       display.setCursor(110, 54);
-    } else if (otaProgressPercent >= 100) {
-      display.setCursor(105, 54);
     } else {
       display.setCursor(115, 54);
     }
@@ -259,7 +313,6 @@ void setupOTAHandlers() {
     otaStatusText = "Updating Firmware...";
     drawOTAUIPage();
   });
-
   ArduinoOTA.setPassword("libyzxy0");
 
   ArduinoOTA.onEnd([]() {
@@ -267,12 +320,10 @@ void setupOTAHandlers() {
     otaStatusText = "Update Complete!";
     drawOTAUIPage();
   });
-
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
     otaProgressPercent = (progress / (total / 100));
     drawOTAUIPage();
   });
-
   ArduinoOTA.onError([](ota_error_t error) {
     otaUpdating = false;
     if (error == OTA_AUTH_ERROR) otaStatusText = "Auth Failed";
@@ -348,7 +399,9 @@ void turnOnDevice() {
   powerMenuSelection = 0;
   currentSettingsSubState = SETTINGS_MAIN;
   settingsSelection = 0;
+  sysInfoPage = 0;
   playBootSound();
+  drawSplashScreen();
   drawMenu();
 }
 
@@ -591,7 +644,6 @@ void runCalendar(bool up, bool down, bool select) {
       JsonArray array = doc.as<JsonArray>();
       for (JsonObject obj : array) {
         if (totalEvents >= 5) break;
-
         String summary = obj["summary"].as<String>();
         String startStr = obj["start"].as<String>();
         String endStr = obj["end"].as<String>();
@@ -599,9 +651,9 @@ void runCalendar(bool up, bool down, bool select) {
         int startT = startStr.indexOf('T');
         int endT = endStr.indexOf('T');
         String startTime = (startT != -1 && startStr.length() >= startT + 6) ?
-          startStr.substring(startT + 1, startT + 6) : startStr;
+        startStr.substring(startT + 1, startT + 6) : startStr;
         String endTime = (endT != -1 && endStr.length() >= endT + 6) ?
-          endStr.substring(endT + 1, endT + 6) : endStr;
+        endStr.substring(endT + 1, endT + 6) : endStr;
 
         int dashIdx = summary.indexOf(" - ");
         String code = (dashIdx != -1) ? summary.substring(0, dashIdx) : summary;
@@ -643,7 +695,6 @@ void runCalendar(bool up, bool down, bool select) {
   display.setTextColor(SH110X_WHITE);
   display.setTextSize(1);
   display.setTextWrap(true);
-
   if (totalEvents == 0) {
     display.setCursor(10, 25);
     display.print("No Events Found!");
@@ -653,7 +704,6 @@ void runCalendar(bool up, bool down, bool select) {
     display.setCursor(0, 0);
     display.print(e.code);
     display.drawLine(0, 10, 128, 10, SH110X_WHITE);
-
     display.setCursor(0, 14);
     display.print(e.summary);
 
@@ -718,8 +768,7 @@ void runCalculator(bool up, bool down, bool select) {
   static bool startNewNum = true;
   static bool hasError = false;
 
-  static int cursorIndex = 0; // Sequential index (0 to 18)
-
+  static int cursorIndex = 0;
   const char keys[5][4] = {
     {'C', '<', '%', '/'},
     {'7', '8', '9', '*'},
@@ -727,11 +776,7 @@ void runCalculator(bool up, bool down, bool select) {
     {'1', '2', '3', '+'},
     {'0', '.', '=', '='}
   };
-
-  // Total valid buttons on grid (row 4, col 3 '=' is merged with col 2)
   const int totalKeys = 19;
-
-  // Navigate sequentially across all keys using UP and DOWN
   if (down) {
     cursorIndex = (cursorIndex + 1) % totalKeys;
   }
@@ -739,13 +784,10 @@ void runCalculator(bool up, bool down, bool select) {
     cursorIndex = (cursorIndex - 1 + totalKeys) % totalKeys;
   }
 
-  // Convert 1D cursor index to 2D grid row/col
   int gridRow = cursorIndex / 4;
   int gridCol = cursorIndex % 4;
-
-  // Handle merged '=' button at the bottom right
   if (gridRow == 4 && gridCol == 3) {
-    cursorIndex = 18; // Wrap to the merged '=' button
+    cursorIndex = 18;
     gridRow = 4;
     gridCol = 2;
   }
@@ -753,7 +795,6 @@ void runCalculator(bool up, bool down, bool select) {
   if (select) {
     playClickSound();
     char k = keys[gridRow][gridCol];
-
     if (hasError && k != 'C') {
       k = 'C';
     }
@@ -824,7 +865,6 @@ void runCalculator(bool up, bool down, bool select) {
           else if (op == '*') result = num1 * num2;
           else if (op == '/') result = num1 / num2;
           else if (op == '%') result = fmod(num1, num2);
-
           num1 = result;
           dtostrf(result, 1, 4, currentInput);
           int l = strlen(currentInput);
@@ -854,7 +894,6 @@ void runCalculator(bool up, bool down, bool select) {
           else if (op == '*') result = num1 * num2;
           else if (op == '/') result = num1 / num2;
           else if (op == '%') result = fmod(num1, num2);
-
           dtostrf(result, 1, 4, currentInput);
           int l = strlen(currentInput);
           while (l > 1 && currentInput[l - 1] == '0') {
@@ -878,7 +917,6 @@ void runCalculator(bool up, bool down, bool select) {
   display.drawRect(0, 0, 128, 16, SH110X_WHITE);
   display.setTextSize(1);
   display.setTextColor(SH110X_WHITE);
-
   if (hasError) {
     display.setCursor(80, 4);
     display.print("ERROR");
@@ -897,13 +935,11 @@ void runCalculator(bool up, bool down, bool select) {
   for (int r = 0; r < 5; r++) {
     for (int c = 0; c < 4; c++) {
       if (r == 4 && c == 3) continue;
-
       int x = c * 32;
       int y = startY + (r * 9);
       int w = (r == 4 && c == 2) ? 62 : btnWidth;
 
       bool isSelected = (gridRow == r && gridCol == c);
-
       if (isSelected) {
         display.fillRect(x, y, w, btnHeight, SH110X_WHITE);
         display.setTextColor(SH110X_BLACK);
@@ -911,17 +947,15 @@ void runCalculator(bool up, bool down, bool select) {
         display.drawRect(x, y, w, btnHeight, SH110X_WHITE);
         display.setTextColor(SH110X_WHITE);
       }
-
       display.setCursor(x + (w / 2) - 3, y + 1);
       display.print(keys[r][c]);
     }
   }
-
   display.display();
 }
 
-vvoid runChat(bool up, bool down, bool select) {
-  static char messageBuffer[16] = "";
+void runChat(bool up, bool down, bool select) {
+  static char messageBuffer[128] = "";
   static int charCount = 0;
   static int currentKeyIndex = 0;
   static bool keyboardActive = true;
@@ -930,7 +964,7 @@ vvoid runChat(bool up, bool down, bool select) {
   static String lastResponse = "";
 
   const char keyboard[] = "ABCDEFGHIJKLMNO"
-                           "PQRSTUVWXYZ <-S";
+                         "PQRSTUVWXYZ <->";
   const int totalKeys = sizeof(keyboard) - 1;
   const int keysPerRow = 15;
 
@@ -938,17 +972,26 @@ vvoid runChat(bool up, bool down, bool select) {
     sendingStatus = false;
   }
 
-  if (selectDoubleClicked) {
-    keyboardActive = !keyboardActive;
+  if (!keyboardActive && !sendingStatus) {
+    if (up || down || select || selectDoubleClicked) {
+      playClickSound();
+      lastResponse = "";
+      messageBuffer[0] = '\0';
+      charCount = 0;
+      keyboardActive = true;
+      return;
+    }
   }
-  else if (select) {
-    if (keyboardActive) {
+
+  if (keyboardActive && !sendingStatus) {
+    if (selectDoubleClicked) {
+      keyboardActive = !keyboardActive;
+    } else if (select) {
       char selectedChar = keyboard[currentKeyIndex];
-      if (selectedChar == 'S') {
+      if (selectedChar == '>') {
         if (charCount > 0) {
           sendingStatus = true;
           sendingTime = millis();
-
           display.clearDisplay();
           display.setCursor(20, 25);
           display.setTextSize(1);
@@ -956,15 +999,11 @@ vvoid runChat(bool up, bool down, bool select) {
           display.print("Sending...");
           display.display();
 
-          // Construct API URL with user query
           String query = String(messageBuffer);
-          query.replace(" ", "%20"); // Simple URL encoding for spaces
+          query.replace(" ", "%20");
           String url = "https://urpocket.libyzxy0.me/api/chat?q=" + query;
-
-          // Fetch API response
           String jsonResponse = fetchHttpsApi(url.c_str());
 
-          // Parse JSON response
           DynamicJsonDocument doc(512);
           DeserializationError error = deserializeJson(doc, jsonResponse);
 
@@ -974,36 +1013,31 @@ vvoid runChat(bool up, bool down, bool select) {
             lastResponse = "Error getting response";
           }
 
-          // Reset input buffer & switch to response view
           messageBuffer[0] = '\0';
           charCount = 0;
           keyboardActive = false;
         }
-      }
-      else if (selectedChar == '<') {
+      } else if (selectedChar == '<') {
         if (charCount > 0) {
           charCount--;
           messageBuffer[charCount] = '\0';
         }
-      } 
-      else {
-        if (charCount < 15) {
+      } else {
+        if (charCount < sizeof(messageBuffer) - 1) {
           messageBuffer[charCount] = selectedChar;
           charCount++;
-          messageBuffer[charCount] = '\0'; 
+          messageBuffer[charCount] = '\0';
         }
       }
     }
-  }
 
-  if (keyboardActive && !sendingStatus) {
     if (down) {
       currentKeyIndex += 1;
-      if (currentKeyIndex >= totalKeys) currentKeyIndex = 0; 
+      if (currentKeyIndex >= totalKeys) currentKeyIndex = 0;
     }
     if (up) {
       currentKeyIndex -= 1;
-      if (currentKeyIndex < 0) currentKeyIndex = totalKeys - 1; 
+      if (currentKeyIndex < 0) currentKeyIndex = totalKeys - 1;
     }
   }
 
@@ -1020,21 +1054,31 @@ vvoid runChat(bool up, bool down, bool select) {
 
   if (keyboardActive) {
     display.drawRect(0, 2, 128, 24, SH110X_WHITE);
-    display.setCursor(4, 10);
     display.setTextSize(1);
     display.setTextColor(SH110X_WHITE);
-    if (charCount == 0) {
-      display.print("Type message...");
-    } else {
-      display.print(messageBuffer);
+
+    int maxVisibleChars = 17;
+    int startIndex = 0;
+    if (charCount > maxVisibleChars) {
+      startIndex = charCount - maxVisibleChars;
+    }
+
+    display.setCursor(4, 10);
+    display.print(&messageBuffer[startIndex]);
+
+    bool showCursor = (millis() / 500) % 2 == 0;
+    if (showCursor) {
+      int visibleCharCount = charCount - startIndex;
+      int cursorX = 4 + (visibleCharCount * 6);
+      display.fillRect(cursorX, 10, 5, 8, SH110X_WHITE);
     }
 
     for (int i = 0; i < totalKeys; i++) {
       int row = i / keysPerRow;
       int col = i % keysPerRow;
-      
       int xPos = col * 8.5 + 2;
       int yPos = 34 + (row * 14);
+
       if (i == currentKeyIndex) {
         display.fillRect(xPos - 1, yPos - 1, 8, 11, SH110X_WHITE);
         display.setTextColor(SH110X_BLACK);
@@ -1048,31 +1092,14 @@ vvoid runChat(bool up, bool down, bool select) {
     }
   } else {
     display.setTextColor(SH110X_WHITE);
-    
-    const char* textToShow = lastResponse.length() > 0 ? lastResponse.c_str() : "No Message";
-    int textLength = strlen(textToShow);
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.print("RESPONSE:");
+    display.drawLine(0, 10, 128, 10, SH110X_WHITE);
 
-    int textSize = 1;
-    if (textLength <= 7) textSize = 3;
-    else if (textLength <= 10) textSize = 2;
-    
-    display.setTextSize(textSize);
-    
-    if (textSize == 1) {
-      display.setTextWrap(true);
-      display.setCursor(0, 0);
-    } else {
-      display.setTextWrap(false);
-      int16_t x1, y1;
-      uint16_t w, h;
-      display.getTextBounds(textToShow, 0, 0, &x1, &y1, &w, &h);
-      
-      int xPos = (128 - w) / 2 - x1;
-      int yPos = (64 - h) / 2 - y1;
-      display.setCursor(xPos, yPos);
-    }
-    
-    display.print(textToShow);
+    display.setCursor(0, 14);
+    display.setTextWrap(true);
+    display.print(lastResponse);
   }
 
   display.display();
@@ -1080,27 +1107,35 @@ vvoid runChat(bool up, bool down, bool select) {
 
 void runSettings(bool up, bool down, bool select) {
   if (currentSettingsSubState == SETTINGS_MAIN) {
-    String wifiLabel = "WiFi  " + String(wifiEnabled ? "            ON" : "           OFF");
-    const char* settingsMenuLabels[] = {wifiLabel.c_str(), "Reprogram          >", "TSound             >"};
-    const int totalSettingsItems = sizeof(settingsMenuLabels) / sizeof(settingsMenuLabels[0]);
+    const char* options[] = {"WiFi", "OTA Update", "Play Tune", "System Info"};
+    const char* indicators[] = {">", ">", "#", ">"};
+    const int totalOptions = 4;
 
     if (down) {
       settingsSelection++;
-      if (settingsSelection >= totalSettingsItems) settingsSelection = 0;
+      if (settingsSelection >= totalOptions) settingsSelection = 0;
     }
     if (up) {
       settingsSelection--;
-      if (settingsSelection < 0) settingsSelection = totalSettingsItems - 1;
+      if (settingsSelection < 0) settingsSelection = totalOptions - 1;
     }
 
     if (select) {
       playClickSound();
       if (settingsSelection == 0) {
-        toggleWiFi();
+        currentSettingsSubState = SETTINGS_WIFI;
       } else if (settingsSelection == 1) {
         currentSettingsSubState = SETTINGS_OTA;
       } else if (settingsSelection == 2) {
         currentSettingsSubState = SETTINGS_TUNE;
+        playHappyBirthday();
+        currentSettingsSubState = SETTINGS_MAIN;
+      } else if (settingsSelection == 3) {
+        currentSettingsSubState = SETTINGS_SYSINFO;
+      } else if (settingsSelection == 4) {
+        currentState = STATE_MENU;
+        drawMenu();
+        return;
       }
     }
 
@@ -1110,20 +1145,64 @@ void runSettings(bool up, bool down, bool select) {
     display.setCursor(0, 0);
     display.print("SETTINGS");
     display.drawLine(0, 10, 128, 10, SH110X_WHITE);
-    for (int i = 0; i < totalSettingsItems; i++) {
-      int yPos = 14 + (i * 12);
+
+    for (int i = 0; i < totalOptions; i++) {
+      int y = 14 + (i * 10);
       if (i == settingsSelection) {
-        display.fillRect(0, yPos - 1, SCREEN_WIDTH, 11, SH110X_WHITE);
+        display.fillRect(0, y - 1, 128, 9, SH110X_WHITE);
         display.setTextColor(SH110X_BLACK);
       } else {
         display.setTextColor(SH110X_WHITE);
       }
-      display.setCursor(4, yPos);
-      display.print(settingsMenuLabels[i]);
+      display.setCursor(2, y);
+      display.print(options[i]);
+
+      if (indicators[i][0] != '\0') {
+        display.setCursor(120, y);
+        display.print(indicators[i]);
+      }
     }
     display.display();
-  } 
-  else if (currentSettingsSubState == SETTINGS_OTA) {
+
+  } else if (currentSettingsSubState == SETTINGS_WIFI) {
+    if (select) {
+      playClickSound();
+      toggleWiFi();
+    }
+    if (up || down) {
+      playClickSound();
+      currentSettingsSubState = SETTINGS_MAIN;
+      return;
+    }
+
+    display.clearDisplay();
+    display.setTextColor(SH110X_WHITE);
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.print("WIFI SETTINGS");
+    display.drawLine(0, 10, 128, 10, SH110X_WHITE);
+
+    display.setCursor(0, 16);
+    display.print("Status: ");
+    display.print(wifiEnabled ? "ON" : "OFF");
+
+    display.setCursor(0, 28);
+    display.print("SSID: ");
+    display.print(ssid);
+
+    display.setCursor(0, 40);
+    display.print("IP: ");
+    if (wifiEnabled && WiFi.status() == WL_CONNECTED) {
+      display.print(WiFi.localIP());
+    } else if (wifiEnabled) {
+      display.print("Connecting...");
+    } else {
+      display.print("Disconnected");
+    }
+
+    display.display();
+
+  } else if (currentSettingsSubState == SETTINGS_OTA) {
     if (select) {
       playClickSound();
       if (!otaEnabled && wifiEnabled) {
@@ -1133,25 +1212,75 @@ void runSettings(bool up, bool down, bool select) {
       }
     }
     drawOTAUIPage();
-  }
-  else if (currentSettingsSubState == SETTINGS_TUNE) {
+
+  } else if (currentSettingsSubState == SETTINGS_SYSINFO) {
+    if (down || up) {
+      playClickSound();
+      sysInfoPage = (sysInfoPage == 0) ? 1 : 0;
+    }
     if (select) {
       playClickSound();
-      playHappyBirthday();
+      currentSettingsSubState = SETTINGS_MAIN;
+      return;
     }
 
     display.clearDisplay();
     display.setTextColor(SH110X_WHITE);
     display.setTextSize(1);
     display.setCursor(0, 0);
-    display.print("Test Sound");
+    display.print("SYSTEM INFO (");
+    display.print(sysInfoPage + 1);
+    display.print("/2)");
     display.drawLine(0, 10, 128, 10, SH110X_WHITE);
-    
-    display.setCursor(0, 10);
-    display.print("Song: Happy Birthday");
-    
-    display.setCursor(0, 54);
-    display.print("Press SEL to Play");
+
+    if (sysInfoPage == 0) {
+      display.setCursor(0, 14);
+      display.print("OS: UrPocket OS");
+
+      display.setCursor(0, 24);
+      display.print("Ver: v1.0.0");
+
+      display.setCursor(0, 34);
+      display.print("Chip: ESP32-C3");
+
+      display.setCursor(0, 44);
+      display.print("Flash: ");
+      display.print(ESP.getFlashChipSize() / (1024 * 1024));
+      display.print("MB");
+
+      display.setCursor(0, 54);
+      display.print("Heap: ");
+      display.print(ESP.getFreeHeap() / 1024);
+      display.print(" KB");
+    } else {
+      display.setCursor(0, 14);
+      display.print("CPU Freq: ");
+      display.print(ESP.getCpuFreqMHz());
+      display.print(" MHz");
+
+      display.setCursor(0, 24);
+      display.print("MC: ");
+      display.print(WiFi.macAddress());
+
+      display.setCursor(0, 34);
+      display.print("WiFi: ");
+      display.print(wifiEnabled ? "Enabled" : "Disabled");
+
+      display.setCursor(0, 44);
+      display.print("NTP Time: ");
+      if (wifiEnabled && WiFi.status() == WL_CONNECTED) {
+        struct tm timeinfo;
+        if (getLocalTime(&timeinfo)) {
+          char timeStr[16];
+          strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
+          display.print(timeStr);
+        } else {
+          display.print("Syncing...");
+        }
+      } else {
+        display.print("WiFi Required");
+      }
+    }
     display.display();
   }
 }
@@ -1168,8 +1297,8 @@ void runAlerts(bool up, bool down, bool select) {
 }
 
 void runPowerOff(bool up, bool down, bool select) {
-  const char* options[] = {"Power Off", "Restart", "Back"};
-  const int totalOptions = 3;
+  const char* options[] = {"Power Off", "Restart"};
+  const int totalOptions = 2;
 
   if (down) {
     powerMenuSelection++;
@@ -1199,18 +1328,18 @@ void runPowerOff(bool up, bool down, bool select) {
   display.setTextColor(SH110X_WHITE);
   display.setCursor(0, 0);
   display.print("POWER OPTIONS");
-   display.drawLine(0, 10, 128, 10, SH110X_WHITE);
+  display.drawLine(0, 10, 128, 10, SH110X_WHITE);
+
   for (int i = 0; i < totalOptions; i++) {
-    int yPos = 18 + (i * 15);
+    int y = 14 + (i * 10);
     if (i == powerMenuSelection) {
-      display.fillRect(0, yPos - 2, SCREEN_WIDTH, 13, SH110X_WHITE);
+      display.fillRect(0, y - 1, 128, 9, SH110X_WHITE);
       display.setTextColor(SH110X_BLACK);
     } else {
       display.setTextColor(SH110X_WHITE);
     }
-    display.setCursor(4, yPos);
+    display.setCursor(2, y);
     display.print(options[i]);
   }
-
   display.display();
 }
