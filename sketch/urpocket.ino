@@ -21,16 +21,14 @@
 const char* ssid = "OrangeCat";
 const char* password = "myorange32";
 
-// WiFi and OTA state management
 bool wifiEnabled = false;
 bool otaEnabled = false;
 bool otaConnecting = false;
 bool otaConnected = false;
 bool otaUpdating = false;
 int otaProgressPercent = 0;
-String otaStatusText = "Press SEL to Start OTA";
+String otaStatusText = "SEL to Start OTA";
 
-// Settings Submenu State
 enum SettingsMenu {
   SETTINGS_MAIN,
   SETTINGS_WIFI,
@@ -40,7 +38,6 @@ enum SettingsMenu {
 SettingsMenu currentSettingsSubState = SETTINGS_MAIN;
 int settingsSelection = 0;
 
-// Power Menu Selection State
 int powerMenuSelection = 0;
 
 Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
@@ -52,19 +49,21 @@ const int BUTTON_SELECT = 7;
 static const unsigned char PROGMEM icon_calendar[] = {0x09,0x20,0x76,0xdc,0xff,0xfe,0xff,0xfe,0x80,0x02,0x86,0xda,0x86,0xda,0x80,0x02,0xb6,0xda,0xb6,0xda,0x80,0x02,0xb6,0xc2,0xb6,0xc2,0x80,0x02,0x7f,0xfc,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x10,0x00,0x00,0x00,0x00,0x80,0x00,0x00,0x00,0x00,0x04,0x10,0x00,0x00,0x00,0x00,0x00,0x80};
 static const unsigned char PROGMEM icon_power[] = {0x01,0x00,0x01,0x00,0x19,0x30,0x25,0x48,0x49,0x24,0x51,0x14,0xa1,0x0a,0xa0,0x0a,0xa0,0x0a,0xa0,0x0a,0xa0,0x0a,0x50,0x14,0x48,0x24,0x27,0xc8,0x18,0x30,0x07,0xc0};
 static const unsigned char PROGMEM icon_gear[] = {0x03,0xc0,0x12,0x48,0x2c,0x34,0x40,0x02,0x23,0xc4,0x24,0x24,0xc8,0x13,0x88,0x11,0x88,0x11,0xc8,0x13,0x24,0x24,0x23,0xc4,0x40,0x02,0x2c,0x34,0x12,0x48,0x03,0xc0};
-static const unsigned char PROGMEM icon_messae[] = {0x7f,0xfe,0x80,0x02,0x80,0x01,0x96,0xd1,0x9f,0xf9,0x80,0x01,0x80,0x01,0x95,0xb1,0x9f,0xf9,0x80,0x01,0x80,0x01,0x63,0xfe,0x14,0x00,0x08,0x00,0x10,0x00,0x00,0x00};
+static const unsigned char PROGMEM icon_message[] = {0x7f,0xfe,0x80,0x02,0x80,0x01,0x96,0xd1,0x9f,0xf9,0x80,0x01,0x80,0x01,0x95,0xb1,0x9f,0xf9,0x80,0x01,0x80,0x01,0x63,0xfe,0x14,0x00,0x08,0x00,0x10,0x00,0x00,0x00};
 static const unsigned char PROGMEM icon_flashcards[] = {0x7f,0xfc,0xc0,0x06,0xff,0xf2,0x80,0x0a,0x80,0x0a,0x9f,0xea,0x90,0x2a,0x9f,0xea,0x80,0x0a,0x80,0x0a,0x8f,0x8a,0x80,0x0a,0x80,0x0a,0x8f,0x8a,0x80,0x0c,0x7f,0xf8};
 static const unsigned char PROGMEM icon_bell[] = {0x11,0x88,0x63,0xc6,0x44,0x22,0x8c,0x11,0x88,0x11,0x10,0x08,0x10,0x08,0x10,0x08,0x10,0x08,0x20,0x04,0x20,0x04,0x40,0x02,0xff,0xff,0x06,0x60,0x03,0xc0,0x00,0x00};
 static const unsigned char PROGMEM icon_pomodoro[] = {0xff,0xe0,0x40,0x40,0x40,0x40,0x51,0x40,0x5f,0x40,0x2e,0x80,0x15,0x00,0x0a,0x00,0x0a,0x00,0x11,0x00,0x24,0x80,0x44,0x40,0x4e,0x40,0x5f,0x40,0x7f,0xc0,0xff,0xe0};
+static const unsigned char PROGMEM icon_calculator[] = {0x7f,0xe0,0x80,0x10,0xbf,0xd0,0xa0,0x50,0xbf,0xd0,0x80,0x10,0xb6,0xd0,0xb6,0xd0,0x80,0x10,0xb6,0xd0,0xb6,0xd0,0x80,0x10,0xb6,0xd0,0xb6,0xd0,0x80,0x10,0x7f,0xe0};
 
 enum AppState {
   STATE_MENU,
   STATE_POMODORO,
   STATE_CALENDAR,
   STATE_FLASHCARDS,
-  STATE_MESSAGES,
-  STATE_SETTINGS,
+  STATE_CALCULATOR,
   STATE_ALERTS,
+  STATE_CHAT,
+  STATE_SETTINGS,
   STATE_POWER_OFF
 };
 
@@ -76,14 +75,15 @@ struct MenuItem {
   AppState targetState;
 };
 
-const int NUM_ITEMS = 7;
+const int NUM_ITEMS = 8;
 MenuItem menuItems[NUM_ITEMS] = {
   {"Pomodoro",   icon_pomodoro,   STATE_POMODORO},
   {"Calendar",   icon_calendar,   STATE_CALENDAR},
   {"Flashcards", icon_flashcards, STATE_FLASHCARDS},
-  {"Messages",   icon_messae,     STATE_MESSAGES},
-  {"Settings",   icon_gear,       STATE_SETTINGS},
+  {"Calculator", icon_calculator, STATE_CALCULATOR},
   {"Alerts",     icon_bell,       STATE_ALERTS},
+  {"ChatGpt",   icon_message,     STATE_CHAT},
+  {"Settings",   icon_gear,       STATE_SETTINGS},
   {"Power Options", icon_power,   STATE_POWER_OFF}
 };
 
@@ -108,7 +108,6 @@ bool selectDoubleClicked = false;
 
 bool isPoweredOn = false;
 
-// Function Declarations
 void handleMenuState(bool up, bool down, bool select);
 void drawMenu();
 void drawOTAUIPage();
@@ -116,14 +115,13 @@ void stopOTA();
 void runPomodoro(bool up, bool down, bool select);
 void runCalendar(bool up, bool down, bool select);
 void runFlashcards(bool up, bool down, bool select);
-void runMessages(bool up, bool down, bool select);
+void runChat(bool up, bool down, bool select);
 void runSettings(bool up, bool down, bool select);
 void runAlerts(bool up, bool down, bool select);
 void runPowerOff(bool up, bool down, bool select);
 void turnOffDevice();
 void turnOnDevice();
 
-// --- HTTPS API Utility ---
 String fetchHttpsApi(const char* url) {
   if (WiFi.status() != WL_CONNECTED) {
     return "Error: No WiFi";
@@ -196,7 +194,6 @@ void playHappyBirthday() {
   digitalWrite(LED_PIN, HIGH);
 }
 
-// WiFi Control Functions
 void toggleWiFi() {
   wifiEnabled = !wifiEnabled;
   if (wifiEnabled) {
@@ -234,8 +231,10 @@ void drawOTAUIPage() {
     display.setCursor(0, 54);
     display.print("Progress");
 
-    if(otaProgressPercent > 10) {
-      display.setCursor(112, 54);
+    if(otaProgressPercent >= 10) {
+      display.setCursor(110, 54);
+    } else if (otaProgressPercent >= 100) {
+      display.setCursor(105, 54);
     } else {
       display.setCursor(115, 54);
     }
@@ -354,7 +353,6 @@ void turnOnDevice() {
 }
 
 void loop() {
-  // OTA is only actively handled when inside the OTA screen, WiFi is enabled, and OTA is toggled ON
   if (currentState == STATE_SETTINGS && currentSettingsSubState == SETTINGS_OTA && wifiEnabled && otaEnabled) {
     ArduinoOTA.handle();
   }
@@ -421,7 +419,6 @@ void loop() {
   }
 
   if (currentState != STATE_MENU && selectLongPressed) {
-    // Safely disable OTA service when navigating back out to main menu
     stopOTA();
     currentState = STATE_MENU;
     currentSettingsSubState = SETTINGS_MAIN;
@@ -442,8 +439,11 @@ void loop() {
     case STATE_FLASHCARDS:
       runFlashcards(upPressed, downPressed, selectPressed);
       break;
-    case STATE_MESSAGES:
-      runMessages(upPressed, downPressed, selectPressed || selectDoubleClicked);
+    case STATE_CALCULATOR:
+      runCalculator(upPressed, downPressed, selectPressed);
+      break;
+    case STATE_CHAT:
+      runChat(upPressed, downPressed, selectPressed || selectDoubleClicked);
       break;
     case STATE_SETTINGS:
       runSettings(upPressed, downPressed, selectPressed);
@@ -564,9 +564,9 @@ void runCalendar(bool up, bool down, bool select) {
   static int totalEvents = 0;
   struct LocalEvent {
     String summary;
-    String code;       // e.g. "IT102"
-    String startTime;  // e.g. "07:00"
-    String timeRange;  // e.g. "07:00 - 10:00"
+    String code;
+    String startTime;
+    String timeRange; 
     String location;
   };
   static LocalEvent events[5];
@@ -603,7 +603,6 @@ void runCalendar(bool up, bool down, bool select) {
         String endTime = (endT != -1 && endStr.length() >= endT + 6) ?
           endStr.substring(endT + 1, endT + 6) : endStr;
 
-        // Pull the short code off the front of "IT102 - Introduction to Computing"
         int dashIdx = summary.indexOf(" - ");
         String code = (dashIdx != -1) ? summary.substring(0, dashIdx) : summary;
 
@@ -620,7 +619,6 @@ void runCalendar(bool up, bool down, bool select) {
     calendarLoaded = true;
   }
 
-  // ---- Input handling ----
   if (viewingDetail) {
     if (up || down || select) {
       playClickSound();
@@ -641,7 +639,6 @@ void runCalendar(bool up, bool down, bool select) {
     }
   }
 
-  // ---- Render ----
   display.clearDisplay();
   display.setTextColor(SH110X_WHITE);
   display.setTextSize(1);
@@ -710,7 +707,220 @@ void runFlashcards(bool up, bool down, bool select) {
   display.display();
 }
 
-void runMessages(bool up, bool down, bool select) {
+void runCalculator(bool up, bool down, bool select) {
+  static double num1 = 0;
+  static double num2 = 0;
+  static double result = 0;
+  static char op = ' ';
+  static char currentInput[16] = "0";
+  static int inputLen = 1;
+  static bool hasDecimal = false;
+  static bool startNewNum = true;
+  static bool hasError = false;
+
+  static int cursorIndex = 0; // Sequential index (0 to 18)
+
+  const char keys[5][4] = {
+    {'C', '<', '%', '/'},
+    {'7', '8', '9', '*'},
+    {'4', '5', '6', '-'},
+    {'1', '2', '3', '+'},
+    {'0', '.', '=', '='}
+  };
+
+  // Total valid buttons on grid (row 4, col 3 '=' is merged with col 2)
+  const int totalKeys = 19;
+
+  // Navigate sequentially across all keys using UP and DOWN
+  if (down) {
+    cursorIndex = (cursorIndex + 1) % totalKeys;
+  }
+  if (up) {
+    cursorIndex = (cursorIndex - 1 + totalKeys) % totalKeys;
+  }
+
+  // Convert 1D cursor index to 2D grid row/col
+  int gridRow = cursorIndex / 4;
+  int gridCol = cursorIndex % 4;
+
+  // Handle merged '=' button at the bottom right
+  if (gridRow == 4 && gridCol == 3) {
+    cursorIndex = 18; // Wrap to the merged '=' button
+    gridRow = 4;
+    gridCol = 2;
+  }
+
+  if (select) {
+    playClickSound();
+    char k = keys[gridRow][gridCol];
+
+    if (hasError && k != 'C') {
+      k = 'C';
+    }
+
+    if (k >= '0' && k <= '9') {
+      if (startNewNum) {
+        currentInput[0] = k;
+        currentInput[1] = '\0';
+        inputLen = 1;
+        hasDecimal = false;
+        startNewNum = false;
+      } else if (inputLen < 12) {
+        if (inputLen == 1 && currentInput[0] == '0') {
+          currentInput[0] = k;
+        } else {
+          currentInput[inputLen] = k;
+          inputLen++;
+          currentInput[inputLen] = '\0';
+        }
+      }
+    } else if (k == '.') {
+      if (startNewNum) {
+        currentInput[0] = '0';
+        currentInput[1] = '.';
+        currentInput[2] = '\0';
+        inputLen = 2;
+        hasDecimal = true;
+        startNewNum = false;
+      } else if (!hasDecimal && inputLen < 12) {
+        currentInput[inputLen] = '.';
+        inputLen++;
+        currentInput[inputLen] = '\0';
+        hasDecimal = true;
+      }
+    } else if (k == '<') {
+      if (!startNewNum && inputLen > 0) {
+        if (currentInput[inputLen - 1] == '.') {
+          hasDecimal = false;
+        }
+        inputLen--;
+        currentInput[inputLen] = '\0';
+        if (inputLen == 0) {
+          currentInput[0] = '0';
+          currentInput[1] = '\0';
+          inputLen = 1;
+          startNewNum = true;
+        }
+      }
+    } else if (k == 'C') {
+      num1 = 0;
+      num2 = 0;
+      result = 0;
+      op = ' ';
+      currentInput[0] = '0';
+      currentInput[1] = '\0';
+      inputLen = 1;
+      hasDecimal = false;
+      startNewNum = true;
+      hasError = false;
+    } else if (k == '+' || k == '-' || k == '*' || k == '/' || k == '%') {
+      if (!startNewNum && op != ' ') {
+        num2 = atof(currentInput);
+        if (op == '/' && num2 == 0) {
+          hasError = true;
+        } else {
+          if (op == '+') result = num1 + num2;
+          else if (op == '-') result = num1 - num2;
+          else if (op == '*') result = num1 * num2;
+          else if (op == '/') result = num1 / num2;
+          else if (op == '%') result = fmod(num1, num2);
+
+          num1 = result;
+          dtostrf(result, 1, 4, currentInput);
+          int l = strlen(currentInput);
+          while (l > 1 && currentInput[l - 1] == '0') {
+            currentInput[l - 1] = '\0';
+            l--;
+          }
+          if (l > 1 && currentInput[l - 1] == '.') {
+            currentInput[l - 1] = '\0';
+            l--;
+          }
+          inputLen = strlen(currentInput);
+        }
+      } else {
+        num1 = atof(currentInput);
+      }
+      op = k;
+      startNewNum = true;
+    } else if (k == '=') {
+      if (op != ' ') {
+        num2 = atof(currentInput);
+        if (op == '/' && num2 == 0) {
+          hasError = true;
+        } else {
+          if (op == '+') result = num1 + num2;
+          else if (op == '-') result = num1 - num2;
+          else if (op == '*') result = num1 * num2;
+          else if (op == '/') result = num1 / num2;
+          else if (op == '%') result = fmod(num1, num2);
+
+          dtostrf(result, 1, 4, currentInput);
+          int l = strlen(currentInput);
+          while (l > 1 && currentInput[l - 1] == '0') {
+            currentInput[l - 1] = '\0';
+            l--;
+          }
+          if (l > 1 && currentInput[l - 1] == '.') {
+            currentInput[l - 1] = '\0';
+            l--;
+          }
+          inputLen = strlen(currentInput);
+          num1 = result;
+          op = ' ';
+          startNewNum = true;
+        }
+      }
+    }
+  }
+
+  display.clearDisplay();
+  display.drawRect(0, 0, 128, 16, SH110X_WHITE);
+  display.setTextSize(1);
+  display.setTextColor(SH110X_WHITE);
+
+  if (hasError) {
+    display.setCursor(80, 4);
+    display.print("ERROR");
+  } else {
+    int strLen = strlen(currentInput);
+    int xPos = 124 - (strLen * 6);
+    if (xPos < 4) xPos = 4;
+    display.setCursor(xPos, 4);
+    display.print(currentInput);
+  }
+
+  int startY = 18;
+  int btnWidth = 30;
+  int btnHeight = 8;
+
+  for (int r = 0; r < 5; r++) {
+    for (int c = 0; c < 4; c++) {
+      if (r == 4 && c == 3) continue;
+
+      int x = c * 32;
+      int y = startY + (r * 9);
+      int w = (r == 4 && c == 2) ? 62 : btnWidth;
+
+      bool isSelected = (gridRow == r && gridCol == c);
+
+      if (isSelected) {
+        display.fillRect(x, y, w, btnHeight, SH110X_WHITE);
+        display.setTextColor(SH110X_BLACK);
+      } else {
+        display.drawRect(x, y, w, btnHeight, SH110X_WHITE);
+        display.setTextColor(SH110X_WHITE);
+      }
+
+      display.setCursor(x + (w / 2) - 3, y + 1);
+      display.print(keys[r][c]);
+    }
+  }
+
+  display.display();
+}
+
+void runChat(bool up, bool down, bool select) {
   static char messageBuffer[16] = "";
   static int charCount = 0;
   static int currentKeyIndex = 0;
