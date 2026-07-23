@@ -2,4 +2,3 @@
 __pycache__/
 *.pyc
 .env
-storage/service-account.json

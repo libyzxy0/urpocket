@@ -25,7 +25,7 @@ def process_chat(q: str):
         "messages": [
             {
                 "role": "system",
-                "content": "Answer in under 21 characters total. Be extremely concise.",
+                "content": "Answer in under 30 characters total. Be extremely concise. Output only letters",
             },
             {"role": "user", "content": q},
         ],
