@@ -93,7 +93,7 @@ MenuItem menuItems[NUM_ITEMS] = {
   {"Flashcards", icon_flashcards, STATE_FLASHCARDS},
   {"Calculator", icon_calculator, STATE_CALCULATOR},
   {"Alerts",     icon_bell,       STATE_ALERTS},
-  {"ChatGpt",    icon_message,    STATE_CHAT},
+  {"ChatGPT",    icon_message,    STATE_CHAT},
   {"Settings",   icon_gear,       STATE_SETTINGS},
   {"Power Options", icon_power,   STATE_POWER_OFF}
 };
