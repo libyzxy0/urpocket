@@ -23,9 +23,9 @@ def process_chat(q: str):
     payload = {
         "model": "google/gemma-4-31b-it:freee",
         "messages": [
-            {
+           {
                 "role": "system",
-                "content": "Answer in under 30 characters total. Be extremely concise. Output only letters",
+                "content": "Answer in under 30 characters total. Be extremely concise. Output only simple chars. utf8 in formulas make it basic",
             },
             {"role": "user", "content": q},
         ],
