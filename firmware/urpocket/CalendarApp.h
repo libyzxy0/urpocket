@@ -233,9 +233,10 @@ public:
       String cleanLocation, professor;
       parseLocationAndProf(e.location, cleanLocation, professor);
 
-      String headerTitle = (e.code.length() > 0) ? e.code : "EVENT DETAIL";
+      String headerTitle = (e.code.length() > 0) ? e.code : "EVENT";
       display.setCursor(0, 0);
       display.print(headerTitle);
+      display.print(" DETAIL");
 
       String headerTime = e.timeRange;
       if (headerTime.length() > 0) {
