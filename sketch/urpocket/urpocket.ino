@@ -233,28 +233,100 @@ public:
 
 class PomodoroApp {
 private:
+  enum AppState { PAUSED, RUNNING };
+  enum TimerMode { WORK_MODE, BREAK_MODE };
+
+  struct Preset {
+    int workSecs;
+    int breakSecs;
+    const char* label;
+  };
+
+  // Available Presets
+  Preset presets[3] = {
+    {25 * 60, 5 * 60,  "25m / 5m"},   // Default
+    {50 * 60, 10 * 60, "50m / 10m"},
+    {15 * 60, 3 * 60,  "15m / 3m"}
+  };
+
+  int currentPresetIndex = 0;
+  AppState state = PAUSED;
+  TimerMode mode = WORK_MODE;
+  
   unsigned long lastTimerUpdate = 0;
-  int secondsLeft = 1500;
+  int secondsLeft = 25 * 60;
+
+  void resetTimerToCurrentPreset() {
+    if (mode == WORK_MODE) {
+      secondsLeft = presets[currentPresetIndex].workSecs;
+    } else {
+      secondsLeft = presets[currentPresetIndex].breakSecs;
+    }
+  }
+
 public:
   void run(Adafruit_SH1106G &display, bool up, bool down, bool select) {
-    if (millis() - lastTimerUpdate >= 1000) {
-      lastTimerUpdate = millis();
-      if (secondsLeft > 0) secondsLeft--;
+ 
+    if (select) {
+      state = (state == RUNNING) ? PAUSED : RUNNING;
     }
+
+    if (state == PAUSED) {
+      if (up) {
+        currentPresetIndex = (currentPresetIndex + 1) % 3;
+        resetTimerToCurrentPreset();
+      } else if (down) {
+        currentPresetIndex = (currentPresetIndex - 1 + 3) % 3;
+        resetTimerToCurrentPreset();
+      }
+    }
+
+    if (state == RUNNING) {
+      if (millis() - lastTimerUpdate >= 1000) {
+        lastTimerUpdate = millis();
+        
+        if (secondsLeft > 0) {
+          secondsLeft--;
+        } else {
+          if (mode == WORK_MODE) {
+            mode = BREAK_MODE;
+          } else {
+            mode = WORK_MODE;
+          }
+          resetTimerToCurrentPreset();
+          state = PAUSED;
+        }
+      }
+    }
+
     display.clearDisplay();
-    display.setCursor(10, 10);
-    display.setTextSize(1);
     display.setTextColor(SH110X_WHITE);
-    display.print("POMODORO TIMER");
-    display.setCursor(10, 30);
-    display.setTextSize(2);
-    display.print(secondsLeft / 60);
-    display.print(":");
-    if(secondsLeft % 60 < 10) display.print("0");
-    display.print(secondsLeft % 60);
+
+    display.setCursor(0, 0);
     display.setTextSize(1);
-    display.setCursor(10, 52);
-    display.print("Hold SELECT to exit");
+    if (mode == WORK_MODE) {
+      display.print("WORK     ");
+    } else {
+      display.print("REST     ");
+    }
+
+    display.print("[");
+    display.print(presets[currentPresetIndex].label);
+    display.print("]");
+
+    display.drawLine(0, 10, 128, 10, SH110X_WHITE);
+
+    display.setCursor(18, 21);
+    display.setTextSize(3);
+    
+    int mins = secondsLeft / 60;
+    int secs = secondsLeft % 60;
+
+    if (mins < 10) display.print("0");
+    display.print(mins);
+    display.print(":");
+    if (secs < 10) display.print("0");
+    display.print(secs);
     display.display();
   }
 };
