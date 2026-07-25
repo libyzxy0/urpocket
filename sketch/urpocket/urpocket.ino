@@ -102,6 +102,23 @@ public:
       noTone(pin);
     }
   }
+  void playWorkStartSound() {
+    tone(pin, 880, 100); delay(120);
+    tone(pin, 1760, 150); delay(150);
+  }
+
+  void playBreakStartSound() {
+    tone(pin, 1568, 100); delay(120);
+    tone(pin, 1175, 100); delay(120);
+    tone(pin, 784, 200);  delay(200);
+  }
+
+  void playTimerEndAlarm() {
+    for (int i = 0; i < 3; i++) {
+      tone(pin, 2000, 80); delay(100);
+      tone(pin, 2000, 80); delay(150);
+    }
+  }
 };
 
 class AppNetworkManager {
@@ -242,11 +259,10 @@ private:
     const char* label;
   };
 
-  // Available Presets
   Preset presets[3] = {
-    {25 * 60, 5 * 60,  "25m / 5m"},   // Default
-    {50 * 60, 10 * 60, "50m / 10m"},
-    {15 * 60, 3 * 60,  "15m / 3m"}
+    {25 * 60, 5 * 60,  "25/5"},  
+    {50 * 60, 10 * 60, "50/10"},
+    {15 * 60, 3 * 60,  "15/3"}
   };
 
   int currentPresetIndex = 0;
@@ -255,6 +271,7 @@ private:
   
   unsigned long lastTimerUpdate = 0;
   int secondsLeft = 25 * 60;
+  int completedCycles = 0; 
 
   void resetTimerToCurrentPreset() {
     if (mode == WORK_MODE) {
@@ -265,19 +282,21 @@ private:
   }
 
 public:
-  void run(Adafruit_SH1106G &display, bool up, bool down, bool select) {
- 
+  void run(Adafruit_SH1106G &display, AudioSystem &audio, bool up, bool down, bool select) {
     if (select) {
       state = (state == RUNNING) ? PAUSED : RUNNING;
+      audio.playClickSound();
     }
 
     if (state == PAUSED) {
       if (up) {
         currentPresetIndex = (currentPresetIndex + 1) % 3;
         resetTimerToCurrentPreset();
+        audio.playClickSound();
       } else if (down) {
         currentPresetIndex = (currentPresetIndex - 1 + 3) % 3;
         resetTimerToCurrentPreset();
+        audio.playClickSound();
       }
     }
 
@@ -288,13 +307,19 @@ public:
         if (secondsLeft > 0) {
           secondsLeft--;
         } else {
+          audio.playTimerEndAlarm();
+
           if (mode == WORK_MODE) {
             mode = BREAK_MODE;
+            audio.playBreakStartSound();
           } else {
             mode = WORK_MODE;
+            completedCycles++;
+            audio.playWorkStartSound();
           }
+
           resetTimerToCurrentPreset();
-          state = PAUSED;
+          state = RUNNING; 
         }
       }
     }
@@ -304,13 +329,16 @@ public:
 
     display.setCursor(0, 0);
     display.setTextSize(1);
+    
     if (mode == WORK_MODE) {
-      display.print("WORK     ");
+      display.print("WORK ");
     } else {
-      display.print("REST     ");
+      display.print("REST ");
     }
 
-    display.print("[");
+    display.print("#");
+    display.print(completedCycles);
+    display.print(" [");
     display.print(presets[currentPresetIndex].label);
     display.print("]");
 
@@ -327,12 +355,16 @@ public:
     display.print(":");
     if (secs < 10) display.print("0");
     display.print(secs);
+
     display.display();
   }
 };
 
 class CalendarApp {
 private:
+  static const int MAX_EVENTS = 20;
+  static const int ITEMS_PER_PAGE = 4;
+
   struct LocalEvent {
     String summary;
     String code;
@@ -340,105 +372,210 @@ private:
     String timeRange;
     String location;
   };
-  bool calendarLoaded = false;
-  bool viewingDetail = false;
+
+  enum AppState {
+    STATE_MINI_CALENDAR,
+    STATE_EVENT_LIST,
+    STATE_EVENT_DETAIL
+  };
+
+  AppState currentState = STATE_MINI_CALENDAR;
+  int currentYear = 2026;
+  int currentMonth = 7;
+  int selectedDay = 23;
+  int daysInMonth = 31;
+  int startDayOfWeek = 3; 
+
+  bool eventsLoaded = false;
   int currentEventIndex = 0;
   int totalEvents = 0;
-  LocalEvent events[5];
+  LocalEvent events[MAX_EVENTS];
+
+  String getFormattedDate(int year, int month, int day) {
+    char buffer[11];
+    snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d", year, month, day);
+    return String(buffer);
+  }
+
+  void fetchEventsForDate(AppNetworkManager &net, String dateStr) {
+    eventsLoaded = false;
+    totalEvents = 0;
+    currentEventIndex = 0;
+
+    String url = "https://urpocket.libyzxy0.me/api/calendar/date?q=" + dateStr;
+    String jsonResponse = net.fetchHttpsApi(url.c_str());
+    
+    DynamicJsonDocument doc(4096);
+    DeserializationError error = deserializeJson(doc, jsonResponse);
+
+    if (!error && doc.is<JsonArray>()) {
+      JsonArray array = doc.as<JsonArray>();
+      for (JsonObject obj : array) {
+        if (totalEvents >= MAX_EVENTS) break;
+        events[totalEvents].summary = obj["summary"] | "No Summary";
+        events[totalEvents].code = obj["code"] | "";
+        events[totalEvents].startTime = obj["startTime"] | "";
+        events[totalEvents].timeRange = obj["timeRange"] | "";
+        events[totalEvents].location = obj["location"] | "";
+        totalEvents++;
+      }
+    }
+    eventsLoaded = true;
+  }
 
 public:
-  void run(Adafruit_SH1106G &display, AppNetworkManager &net, AudioSystem &audio, bool up, bool down, bool select) {
-    if (!calendarLoaded) {
-      display.clearDisplay();
-      display.setTextColor(SH110X_WHITE);
-      display.setTextSize(1);
-      display.setCursor(10, 25);
-      display.print("Fetching Schedule...");
-      display.display();
-
-      String jsonResponse = net.fetchHttpsApi("https://urpocket.libyzxy0.me/api/calendar/today");
-      DynamicJsonDocument doc(2048);
-      DeserializationError error = deserializeJson(doc, jsonResponse);
-
-      totalEvents = 0;
-      if (!error && doc.is<JsonArray>()) {
-        JsonArray array = doc.as<JsonArray>();
-        for (JsonObject obj : array) {
-          if (totalEvents >= 5) break;
-          events[totalEvents].summary = obj["summary"] | "No Summary";
-          events[totalEvents].code = obj["code"] | "";
-          events[totalEvents].startTime = obj["startTime"] | "";
-          events[totalEvents].timeRange = obj["timeRange"] | "";
-          events[totalEvents].location = obj["location"] | "";
-          totalEvents++;
-        }
-      }
-      calendarLoaded = true;
+  void run(Adafruit_SH1106G &display, AppNetworkManager &net, AudioSystem &audio, bool up, bool down, bool select, bool selectDoubleClicked) {
+    if (up || down || select || selectDoubleClicked) {
+      audio.playClickSound();
     }
 
-    if (viewingDetail) {
-      if (up || down || select) {
-        audio.playClickSound();
-        viewingDetail = false;
-      }
+    // Universal Double-Click Shortcut: Instantly return to mini calendar view
+    if (selectDoubleClicked) {
+      currentState = STATE_MINI_CALENDAR;
     } else {
-      if (down && totalEvents > 0) {
-        audio.playClickSound();
-        currentEventIndex = (currentEventIndex + 1) % totalEvents;
-      }
-      if (up && totalEvents > 0) {
-        audio.playClickSound();
-        currentEventIndex = (currentEventIndex - 1 + totalEvents) % totalEvents;
-      }
-      if (select && totalEvents > 0) {
-        audio.playClickSound();
-        viewingDetail = true;
+      // Normal single-input state handling
+      switch (currentState) {
+        case STATE_MINI_CALENDAR:
+          if (down) {
+            selectedDay = (selectedDay % daysInMonth) + 1;
+          } else if (up) {
+            selectedDay = (selectedDay - 2 + daysInMonth) % daysInMonth + 1; 
+          } else if (select) {
+            display.clearDisplay();
+            display.setTextColor(SH110X_WHITE);
+            display.setTextSize(1);
+            display.setCursor(10, 25);
+            display.print("Fetching Schedule...");
+            display.display();
+
+            fetchEventsForDate(net, getFormattedDate(currentYear, currentMonth, selectedDay));
+            currentState = STATE_EVENT_LIST;
+          }
+          break;
+
+        case STATE_EVENT_LIST:
+          if (totalEvents > 0) {
+            if (down) {
+              currentEventIndex = (currentEventIndex + 1) % totalEvents; 
+            } else if (up) {
+              currentEventIndex = (currentEventIndex - 1 + totalEvents) % totalEvents;
+            } else if (select) {
+              currentState = STATE_EVENT_DETAIL;
+            }
+          }
+          break;
+
+        case STATE_EVENT_DETAIL:
+          if (up || down || select) {
+            currentState = STATE_EVENT_LIST; 
+          }
+          break;
       }
     }
 
+    // Rendering Phase
     display.clearDisplay();
     display.setTextColor(SH110X_WHITE);
     display.setTextSize(1);
-    display.setTextWrap(true);
+    display.setTextWrap(false);
 
-    if (totalEvents == 0) {
-      display.setCursor(10, 25);
-      display.print("No Events Found!");
-    } else if (viewingDetail) {
+    if (currentState == STATE_MINI_CALENDAR) {
+      display.setCursor(0, 0);
+      display.print("CALENDAR   ");
+      display.print(getFormattedDate(currentYear, currentMonth, selectedDay));
+      display.drawLine(0, 10, 128, 10, SH110X_WHITE);
+
+      const char* daysOfWeek = "S  M  T  W  T  F  S";
+      display.setCursor(2, 14);
+      display.print(daysOfWeek);
+
+      int gridStartX = 2;
+      int gridStartY = 24;
+      int cellWidth = 18;
+      int cellHeight = 8;
+
+      for (int day = 1; day <= daysInMonth; day++) {
+        int dayIndex = startDayOfWeek + day - 1;
+        int col = dayIndex % 7;
+        int row = dayIndex / 7;
+
+        int x = gridStartX + (col * cellWidth);
+        int y = gridStartY + (row * cellHeight);
+
+        if (y > 56) break;
+
+        if (day == selectedDay) {
+          display.fillRect(x - 1, y - 1, 14, cellHeight, SH110X_WHITE);
+          display.setTextColor(SH110X_BLACK);
+        } else {
+          display.setTextColor(SH110X_WHITE);
+        }
+
+        display.setCursor(x, y);
+        if (day < 10) display.print("0");
+        display.print(day);
+      }
+
+    } else if (currentState == STATE_EVENT_LIST) {
+      int totalPages = (totalEvents > 0) ? ((totalEvents + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE) : 1;
+      int currentPage = currentEventIndex / ITEMS_PER_PAGE;
+      int pageStartIndex = currentPage * ITEMS_PER_PAGE;
+      int pageEndIndex = min(pageStartIndex + ITEMS_PER_PAGE, totalEvents);
+
+      display.setCursor(0, 0);
+      display.print("EVENTS P.");
+      display.print(currentPage + 1);
+      display.print("/");
+      display.print(totalPages);
+
+      display.drawLine(0, 10, 128, 10, SH110X_WHITE);
+
+      if (totalEvents == 0) {
+        display.setCursor(10, 25);
+        display.print("No Events Found!");
+        display.setCursor(10, 42);
+        display.print("Dbl-click to Back");
+      } else {
+        int linePos = 0;
+        for (int i = pageStartIndex; i < pageEndIndex; i++) {
+          int y = 14 + (linePos * 11);
+          bool selected = (i == currentEventIndex);
+
+          if (selected) {
+            display.fillRect(0, y - 1, 128, 10, SH110X_WHITE);
+            display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+          } else {
+            display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+          }
+
+          display.setCursor(2, y);
+
+          String label = events[i].startTime + " " + events[i].code;
+          label.trim();
+
+          if (label.length() == 0) label = events[i].summary;
+          if (label.length() == 0) label = "Event " + String(i + 1);
+
+          display.print(label);
+          linePos++;
+        }
+      }
+    } else if (currentState == STATE_EVENT_DETAIL) {
       LocalEvent &e = events[currentEventIndex];
       display.setCursor(0, 0);
       display.print(e.code);
       display.drawLine(0, 10, 128, 10, SH110X_WHITE);
+
       display.setCursor(0, 14);
       display.print(e.summary);
       display.setCursor(0, 32);
       display.print("TIME: ");
       display.print(e.timeRange);
-      display.setCursor(0, 42);
+      display.setCursor(0, 44);
+      display.print("LOC : ");
       display.print(e.location);
-    } else {
-      display.setCursor(0, 0);
-      display.print("SCHEDULE");
-      String countStr = String(totalEvents) + (totalEvents == 1 ? " event" : " events");
-      display.setCursor(128 - (countStr.length() * 6), 0);
-      display.print(countStr);
-      display.drawLine(0, 10, 128, 10, SH110X_WHITE);
-
-      for (int i = 0; i < totalEvents; i++) {
-        int y = 14 + (i * 10);
-        bool selected = (i == currentEventIndex);
-        if (selected) {
-          display.fillRect(0, y - 1, 128, 9, SH110X_WHITE);
-          display.setTextColor(SH110X_BLACK);
-        } else {
-          display.setTextColor(SH110X_WHITE);
-        }
-        display.setCursor(2, y);
-        display.print(events[i].startTime);
-        display.print(" ");
-        display.print(events[i].code);
-      }
     }
+
     display.display();
   }
 };
@@ -1483,10 +1620,10 @@ public:
         handleMenuState(upPressed, downPressed, selectPressed);
         break;
       case STATE_POMODORO:
-        pomodoroApp.run(display, upPressed, downPressed, selectPressed);
+        pomodoroApp.run(display, audio, upPressed, downPressed, selectPressed);
         break;
       case STATE_CALENDAR:
-        calendarApp.run(display, network, audio, upPressed, downPressed, selectPressed);
+        calendarApp.run(display, network, audio, upPressed, downPressed, selectPressed, selectDoubleClicked);
         break;
       case STATE_FLASHCARDS:
         flashcardsApp.run(display, audio, upPressed, downPressed, selectPressed);
@@ -1518,4 +1655,4 @@ void setup() {
 
 void loop() {
   systemDevice.loop();
-}
+} 
