@@ -397,6 +397,22 @@ private:
     return String(buffer);
   }
 
+  // Helper method to parse "Location (Professor)" into separate strings
+  void parseLocationAndProf(const String &rawLoc, String &cleanLoc, String &prof) {
+    int openParen = rawLoc.indexOf('(');
+    int closeParen = rawLoc.indexOf(')', openParen);
+
+    if (openParen != -1 && closeParen != -1 && closeParen > openParen) {
+      cleanLoc = rawLoc.substring(0, openParen);
+      cleanLoc.trim();
+      prof = rawLoc.substring(openParen + 1, closeParen);
+      prof.trim();
+    } else {
+      cleanLoc = rawLoc.length() > 0 ? rawLoc : "None";
+      prof = "N/A";
+    }
+  }
+
   void fetchEventsForDate(AppNetworkManager &net, String dateStr) {
     eventsLoaded = false;
     totalEvents = 0;
@@ -412,11 +428,13 @@ private:
       JsonArray array = doc.as<JsonArray>();
       for (JsonObject obj : array) {
         if (totalEvents >= MAX_EVENTS) break;
-        events[totalEvents].summary = obj["summary"] | "No Summary";
-        events[totalEvents].code = obj["code"] | "";
+
+        events[totalEvents].summary   = obj["summary"]   | "No Summary";
+        events[totalEvents].code      = obj["code"]      | "";
         events[totalEvents].startTime = obj["startTime"] | "";
         events[totalEvents].timeRange = obj["timeRange"] | "";
-        events[totalEvents].location = obj["location"] | "";
+        events[totalEvents].location  = obj["location"]  | "";
+
         totalEvents++;
       }
     }
@@ -429,11 +447,9 @@ public:
       audio.playClickSound();
     }
 
-    // Universal Double-Click Shortcut: Instantly return to mini calendar view
     if (selectDoubleClicked) {
       currentState = STATE_MINI_CALENDAR;
     } else {
-      // Normal single-input state handling
       switch (currentState) {
         case STATE_MINI_CALENDAR:
           if (down) {
@@ -444,8 +460,8 @@ public:
             display.clearDisplay();
             display.setTextColor(SH110X_WHITE);
             display.setTextSize(1);
-            display.setCursor(10, 25);
-            display.print("Fetching Schedule...");
+            display.setCursor(0, 0);
+            display.print("Loading Schedule...");
             display.display();
 
             fetchEventsForDate(net, getFormattedDate(currentYear, currentMonth, selectedDay));
@@ -473,7 +489,6 @@ public:
       }
     }
 
-    // Rendering Phase
     display.clearDisplay();
     display.setTextColor(SH110X_WHITE);
     display.setTextSize(1);
@@ -523,7 +538,7 @@ public:
       int pageEndIndex = min(pageStartIndex + ITEMS_PER_PAGE, totalEvents);
 
       display.setCursor(0, 0);
-      display.print("EVENTS P.");
+      display.print("EVENTS ");
       display.print(currentPage + 1);
       display.print("/");
       display.print(totalPages);
@@ -548,32 +563,49 @@ public:
             display.setTextColor(SH110X_WHITE, SH110X_BLACK);
           }
 
+          String leftStr = events[i].startTime;
+          if (leftStr.length() == 0) leftStr = "--:--";
+
+          String rightStr = events[i].code;
+          if (rightStr.length() == 0) {
+            rightStr = events[i].summary;
+          }
+          if (rightStr.length() == 0) {
+            rightStr = "Event " + String(i + 1);
+          }
+
           display.setCursor(2, y);
+          display.print(leftStr);
 
-          String label = events[i].startTime + " " + events[i].code;
-          label.trim();
+          int rightX = 126 - (rightStr.length() * 6);
+          if (rightX < 40) rightX = 40; 
 
-          if (label.length() == 0) label = events[i].summary;
-          if (label.length() == 0) label = "Event " + String(i + 1);
+          display.setCursor(rightX, y);
+          display.print(rightStr);
 
-          display.print(label);
           linePos++;
         }
       }
     } else if (currentState == STATE_EVENT_DETAIL) {
       LocalEvent &e = events[currentEventIndex];
-      display.setCursor(0, 0);
-      display.print(e.code);
-      display.drawLine(0, 10, 128, 10, SH110X_WHITE);
+      
+      String cleanLocation, professor;
+      parseLocationAndProf(e.location, cleanLocation, professor);
 
+      display.setCursor(0, 0);
+      display.print(e.code.length() > 0 ? e.code : "EVENT DETAIL");
+      display.drawLine(0, 10, 128, 10, SH110X_WHITE);
       display.setCursor(0, 14);
       display.print(e.summary);
-      display.setCursor(0, 32);
-      display.print("TIME: ");
+      
+      display.setCursor(0, 26);
       display.print(e.timeRange);
-      display.setCursor(0, 44);
-      display.print("LOC : ");
-      display.print(e.location);
+
+      display.setCursor(0, 38);
+      display.print(cleanLocation);
+
+      display.setCursor(0, 50);
+      display.print(professor);
     }
 
     display.display();

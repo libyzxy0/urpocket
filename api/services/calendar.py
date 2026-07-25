@@ -9,11 +9,19 @@ TIMEZONE = ZoneInfo("Asia/Manila")
 
 
 def parse_course_code(summary: str) -> str:
-    """Extracts course code prefix (e.g. 'IT102' from 'IT102 - Intro to Computing')."""
-    if not summary:
+    """
+    Extracts course code prefix by splitting on dash '-'.
+    Works for codes with or without numbers (e.g. 'PE', 'IT102', 'CS-101').
+    """
+    if not summary or "-" not in summary:
         return ""
-    match = re.match(r"^([A-Za-z]{2,4}\s?\d{2,4})", summary.strip())
-    return match.group(1) if match else ""
+    
+    # Split by ' - ' first to preserve hyphenated codes like 'CS-101 - Data Structures'
+    if " - " in summary:
+        return summary.split(" - ")[0].strip()
+    
+    # Fallback to direct dash split
+    return summary.split("-")[0].strip()
 
 
 def format_time_range(start_iso: str, end_iso: str) -> tuple[str, str]:
